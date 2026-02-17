@@ -6,7 +6,7 @@ Bybit Demo (api-demo.bybit.com) = mirror of real market with virtual money.
 
 import asyncio
 import logging
-from decimal import Decimal, ROUND_DOWN
+from decimal import ROUND_DOWN, Decimal
 from typing import Optional
 
 from pybit.unified_trading import HTTP

@@ -6,10 +6,9 @@ import pytest
 
 from indicators.aplus_signal import (
     StreamingAPlusSignal,
-    _compute_pivots_high,
-    _compute_pivots_low,
     compute_aplus_signals,
 )
+from indicators.pivots import compute_pivots_high, compute_pivots_low
 from models import SignalDirection
 
 
@@ -19,21 +18,21 @@ class TestPivotComputation:
     def test_simple_pivot_high(self):
         """Clear peak at index 5 should be detected."""
         arr = np.array([10, 11, 12, 13, 14, 20, 14, 13, 12, 11, 10], dtype=float)
-        result = _compute_pivots_high(arr, lookback=3)
+        result = compute_pivots_high(arr, lookback=3)
         # Pivot at index 5, confirmed at index 5+3=8
         assert result[8] == True
 
     def test_simple_pivot_low(self):
         """Clear trough at index 5 should be detected."""
         arr = np.array([20, 19, 18, 17, 16, 10, 16, 17, 18, 19, 20], dtype=float)
-        result = _compute_pivots_low(arr, lookback=3)
+        result = compute_pivots_low(arr, lookback=3)
         assert result[8] == True
 
     def test_no_pivot_in_flat(self):
         """Flat data should have no pivots."""
         arr = np.array([10.0] * 20)
-        result_h = _compute_pivots_high(arr, lookback=3)
-        result_l = _compute_pivots_low(arr, lookback=3)
+        result_h = compute_pivots_high(arr, lookback=3)
+        result_l = compute_pivots_low(arr, lookback=3)
         assert not result_h.any()
         assert not result_l.any()
 

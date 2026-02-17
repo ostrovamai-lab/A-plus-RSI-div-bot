@@ -17,8 +17,8 @@ import numpy as np
 import pandas as pd
 import pandas_ta as ta
 
+from indicators.pivots import is_pivot_high, is_pivot_low
 from models import Divergence, DivergenceType
-
 
 # ── Vectorized (for backtest) ──────────────────────────────
 
@@ -143,16 +143,16 @@ def detect_divergences(
 
     for i in range(lb, n - lb):
         # RSI pivot high
-        if _is_pivot_high(rsi_vals, i, lb):
+        if is_pivot_high(rsi_vals, i, lb):
             rsi_highs.append((i, rsi_vals[i]))
         # RSI pivot low
-        if _is_pivot_low(rsi_vals, i, lb):
+        if is_pivot_low(rsi_vals, i, lb):
             rsi_lows.append((i, rsi_vals[i]))
         # Price pivot high
-        if _is_pivot_high(high_vals, i, lb):
+        if is_pivot_high(high_vals, i, lb):
             price_highs.append((i, high_vals[i]))
         # Price pivot low
-        if _is_pivot_low(low_vals, i, lb):
+        if is_pivot_low(low_vals, i, lb):
             price_lows.append((i, low_vals[i]))
 
     divergences: list[Divergence] = []
@@ -231,35 +231,6 @@ def detect_divergences(
     divergences.sort(key=lambda d: d.bar_index)
     return divergences
 
-
-def _is_pivot_high(arr: np.ndarray, idx: int, lookback: int) -> bool:
-    """Check if arr[idx] is a pivot high within lookback window."""
-    val = arr[idx]
-    if np.isnan(val):
-        return False
-    start = max(0, idx - lookback)
-    end = min(len(arr), idx + lookback + 1)
-    for i in range(start, end):
-        if i == idx:
-            continue
-        if arr[i] >= val:
-            return False
-    return True
-
-
-def _is_pivot_low(arr: np.ndarray, idx: int, lookback: int) -> bool:
-    """Check if arr[idx] is a pivot low within lookback window."""
-    val = arr[idx]
-    if np.isnan(val):
-        return False
-    start = max(0, idx - lookback)
-    end = min(len(arr), idx + lookback + 1)
-    for i in range(start, end):
-        if i == idx:
-            continue
-        if arr[i] <= val:
-            return False
-    return True
 
 
 def _find_nearest_pivot(

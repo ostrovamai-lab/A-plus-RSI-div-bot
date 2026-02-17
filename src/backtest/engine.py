@@ -20,17 +20,15 @@ import logging
 
 import numpy as np
 import pandas as pd
-import pandas_ta as ta
 
 from config import BotConfig, load_config
-from indicators.aplus_signal import compute_aplus_signals
-from indicators.kama import compute_kama_full
 from indicators.resampler import klines_to_df, resample_ohlcv
-from indicators.tp_rsi_v2 import build_divergence_lookup, compute_tp_rsi, detect_divergences
+from indicators.suite import compute_htf_kama, compute_indicator_suite
 from models import BacktestResult, SignalDirection, Trade
 from scoring.signal_scorer import score_signal
-from strategy.exit_engine import check_opposite_signal, check_stop_loss, check_time_stop
 from strategy.entry_engine import compute_entry_grid, compute_stop_loss
+from strategy.exit_engine import check_opposite_signal, check_stop_loss, check_time_stop
+from strategy.pnl import compute_fee, compute_pnl
 from strategy.risk_manager import RiskManager
 
 logger = logging.getLogger(__name__)
@@ -76,63 +74,17 @@ def run_backtest(
     n = len(df_8m)
 
     # ── 2. Pre-compute indicators ──
-    # A+ signals
-    aplus = compute_aplus_signals(
-        df_8m,
-        pivot_lookback=cfg.aplus.pivot_lookback,
-        fractal_len=cfg.aplus.fractal_len,
-        step_window=cfg.aplus.step_window,
-        gate_max_age=cfg.aplus.gate_max_age,
-        ema_fast_len=cfg.aplus.ema_fast,
-        ema_slow_len=cfg.aplus.ema_slow,
-        break_mode=cfg.aplus.break_mode,
-        buffer_ticks=cfg.aplus.buffer_ticks,
-        need_retest=cfg.aplus.need_retest,
-        retest_lookback=cfg.aplus.retest_lookback,
-        allow_pre_cross=cfg.aplus.allow_pre_cross,
-    )
-
-    # TP RSI
-    tp_rsi = compute_tp_rsi(
-        close, high, low,
-        rsi_period=cfg.tp_rsi.rsi_period,
-        bb_period=cfg.tp_rsi.bb_period,
-        bb_mult=cfg.tp_rsi.bb_mult,
-        bb_sigma=cfg.tp_rsi.bb_sigma,
-        ribbon_ma_type=cfg.tp_rsi.ribbon_ma_type,
-        ribbon_pairs=cfg.tp_rsi.ribbon_pairs,
-    )
-
-    # Divergences
-    divergences = detect_divergences(
-        close, high, low, tp_rsi["rsi"],
-        pivot_lookback=cfg.tp_rsi.divergence_lookback,
-        max_range=cfg.tp_rsi.divergence_max_range,
-    )
-    div_lookup = build_divergence_lookup(divergences, window=5)
-
-    # KAMA
-    kama = compute_kama_full(
-        close,
-        er_length=cfg.kama.er_length,
-        fast_length=cfg.kama.fast_length,
-        slow_length=cfg.kama.slow_length,
-        slope_bars=cfg.kama.slope_bars,
-    )
-
-    # ATR for grid sizing
-    atr = ta.atr(high, low, close, length=14)
-    if atr is None:
-        atr = pd.Series(0.0, index=close.index)
-
-    # Volume EMA
-    vol_ema = ta.ema(volume, length=20)
-    if vol_ema is None:
-        vol_ema = pd.Series(0.0, index=volume.index)
+    ind = compute_indicator_suite(df_8m, cfg)
+    aplus = ind.aplus
+    tp_rsi = ind.tp_rsi
+    div_lookup = ind.div_lookup
+    kama = ind.kama
+    atr = ind.atr
+    vol_ema = ind.vol_ema
 
     # ── 3. HTF indicators ──
-    htf_1h_bullish = _compute_htf_kama(klines_1h, cfg) if klines_1h else None
-    htf_4h_bullish = _compute_htf_kama(klines_4h, cfg) if klines_4h else None
+    htf_1h_bullish = compute_htf_kama(klines_1h, cfg) if klines_1h else None
+    htf_4h_bullish = compute_htf_kama(klines_4h, cfg) if klines_4h else None
 
     # Build timestamp mapping for HTF
     ts_8m = df_8m["timestamp"].values.astype(int)
@@ -333,12 +285,10 @@ def run_backtest(
         # Track equity
         unrealized = 0.0
         for pos in open_positions:
-            avg_entry = _avg_entry(pos)
-            qty = _total_qty(pos)
-            if pos["direction"] == SignalDirection.LONG:
-                unrealized += (price - avg_entry) * qty * cfg.leverage
-            else:
-                unrealized += (avg_entry - price) * qty * cfg.leverage
+            unrealized += compute_pnl(
+                pos["direction"], _avg_entry(pos), price,
+                _total_qty(pos), cfg.leverage,
+            )
 
         current_eq = risk.current_equity + unrealized
         result.equity_curve.append(current_eq)
@@ -363,16 +313,8 @@ def _close_position(pos: dict, exit_price: float, bar_index: int, reason: str, c
     qty = _total_qty(pos)
     direction = pos["direction"]
 
-    if direction == SignalDirection.LONG:
-        pnl = (exit_price - avg) * qty * cfg.leverage
-    else:
-        pnl = (avg - exit_price) * qty * cfg.leverage
-
-    notional = qty * avg * cfg.leverage
-    if reason in ("sl", "opposite_signal", "drawdown"):
-        fee = notional * (cfg.exit.maker_fee + cfg.exit.taker_fee)  # market exit
-    else:
-        fee = notional * (cfg.exit.maker_fee * 2)  # limit exit (time_stop, backtest_end)
+    pnl = compute_pnl(direction, avg, exit_price, qty, cfg.leverage)
+    fee = compute_fee(avg, qty, cfg.leverage, reason, cfg.exit.maker_fee, cfg.exit.taker_fee)
 
     return Trade(
         open_time=pos["open_bar"],
@@ -402,20 +344,6 @@ def _avg_entry(pos: dict) -> float:
 def _total_qty(pos: dict) -> float:
     return sum(q for _, q in pos["fills"])
 
-
-def _compute_htf_kama(klines: list[dict], cfg: BotConfig) -> np.ndarray | None:
-    """Compute KAMA bullish/bearish for HTF data."""
-    df = klines_to_df(klines)
-    if df.empty:
-        return None
-    kama_result = compute_kama_full(
-        df["close"],
-        er_length=cfg.kama.er_length,
-        fast_length=cfg.kama.fast_length,
-        slow_length=cfg.kama.slow_length,
-        slope_bars=cfg.kama.slope_bars,
-    )
-    return kama_result["bullish"].values
 
 
 def _build_htf_map(ts_base: np.ndarray, klines_htf: list[dict]) -> dict[int, int]:

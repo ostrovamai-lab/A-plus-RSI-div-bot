@@ -13,6 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from models import SignalDirection, Trade
+from strategy.pnl import compute_fee, compute_pnl
 
 
 @dataclass
@@ -42,12 +43,10 @@ class ManagedPosition:
         return sum(e.price * e.qty for e in self.entries)
 
     def unrealized_pnl(self, current_price: float, leverage: int = 1) -> float:
-        qty = self.total_qty
-        avg = self.avg_entry_price
-        if self.direction == SignalDirection.LONG:
-            return (current_price - avg) * qty * leverage
-        else:
-            return (avg - current_price) * qty * leverage
+        return compute_pnl(
+            self.direction, self.avg_entry_price, current_price,
+            self.total_qty, leverage,
+        )
 
     def is_profitable(self, current_price: float) -> bool:
         return self.unrealized_pnl(current_price) > 0
@@ -168,17 +167,8 @@ class PositionManager:
                 qty = pos.total_qty
                 avg_entry = pos.avg_entry_price
 
-                if direction == SignalDirection.LONG:
-                    pnl = (exit_price - avg_entry) * qty * leverage
-                else:
-                    pnl = (avg_entry - exit_price) * qty * leverage
-
-                # Fee: entry was maker (limit), exit depends on reason
-                notional = qty * avg_entry * leverage
-                if reason in ("sl", "opposite_signal", "drawdown"):
-                    fee = notional * (maker_fee + taker_fee)  # market exit
-                else:
-                    fee = notional * (maker_fee * 2)  # limit exit (time_stop)
+                pnl = compute_pnl(direction, avg_entry, exit_price, qty, leverage)
+                fee = compute_fee(avg_entry, qty, leverage, reason, maker_fee, taker_fee)
 
                 trade = Trade(
                     open_time=pos.open_bar,

@@ -32,8 +32,8 @@ import numpy as np
 import pandas as pd
 import pandas_ta as ta
 
+from indicators.pivots import compute_pivots_high, compute_pivots_low, is_pivot_high, is_pivot_low
 from models import APlusSignal, SignalDirection
-
 
 # ── Vectorized Implementation (backtest) ──────────────────
 
@@ -85,12 +85,12 @@ def compute_aplus_signals(
     ema_slow_arr = ema_slow.values.astype(float)
 
     # Pre-compute pivot highs and lows (main swing detection)
-    pivot_highs = _compute_pivots_high(high_arr, pivot_lookback)
-    pivot_lows = _compute_pivots_low(low_arr, pivot_lookback)
+    pivot_highs = compute_pivots_high(high_arr, pivot_lookback)
+    pivot_lows = compute_pivots_low(low_arr, pivot_lookback)
 
     # Pre-compute fractal pivots (current TF)
-    fractal_highs = _compute_pivots_high(high_arr, fractal_len)
-    fractal_lows = _compute_pivots_low(low_arr, fractal_len)
+    fractal_highs = compute_pivots_high(high_arr, fractal_len)
+    fractal_lows = compute_pivots_low(low_arr, fractal_len)
 
     # Output arrays
     aplus_long = np.zeros(n, dtype=bool)
@@ -322,54 +322,6 @@ def compute_aplus_signals(
     }
 
 
-def _compute_pivots_high(arr: np.ndarray, lookback: int) -> np.ndarray:
-    """Compute pivot highs. Result[i] is True if arr[i-lookback] is a pivot high.
-
-    Pine Script: ta.pivothigh(high, length, length) confirms at bar_index,
-    the pivot is at bar_index - length.
-    """
-    n = len(arr)
-    result = np.zeros(n, dtype=bool)
-    for i in range(lookback, n - lookback):
-        val = arr[i]
-        is_pivot = True
-        for j in range(i - lookback, i + lookback + 1):
-            if j == i:
-                continue
-            if j < 0 or j >= n:
-                continue
-            if arr[j] >= val:
-                is_pivot = False
-                break
-        if is_pivot:
-            # Confirmed at i + lookback
-            confirm_bar = i + lookback
-            if confirm_bar < n:
-                result[confirm_bar] = True
-    return result
-
-
-def _compute_pivots_low(arr: np.ndarray, lookback: int) -> np.ndarray:
-    """Compute pivot lows. Result[i] is True if arr[i-lookback] is a pivot low."""
-    n = len(arr)
-    result = np.zeros(n, dtype=bool)
-    for i in range(lookback, n - lookback):
-        val = arr[i]
-        is_pivot = True
-        for j in range(i - lookback, i + lookback + 1):
-            if j == i:
-                continue
-            if j < 0 or j >= n:
-                continue
-            if arr[j] <= val:
-                is_pivot = False
-                break
-        if is_pivot:
-            confirm_bar = i + lookback
-            if confirm_bar < n:
-                result[confirm_bar] = True
-    return result
-
 
 # ── Streaming Implementation (live) ──────────────────────
 
@@ -463,14 +415,14 @@ class StreamingAPlusSignal:
             pivot_idx = buf_len - 1 - lb  # The candidate pivot position
 
             # Pivot high check
-            is_ph = self._check_pivot_high(arr_h, pivot_idx, lb)
+            is_ph = is_pivot_high(arr_h, pivot_idx, lb)
             if is_ph:
                 self._ph_top = arr_h[pivot_idx]
                 self._ph_btm = max(arr_c[pivot_idx], arr_o[pivot_idx])
                 self._ph_crossed = False
 
             # Pivot low check
-            is_pl = self._check_pivot_low(arr_l, pivot_idx, lb)
+            is_pl = is_pivot_low(arr_l, pivot_idx, lb)
             if is_pl:
                 self._pl_top = min(arr_c[pivot_idx], arr_o[pivot_idx])
                 self._pl_btm = arr_l[pivot_idx]
@@ -518,7 +470,7 @@ class StreamingAPlusSignal:
             frac_idx = len(buf_l) - 1 - fl
 
             if self._direction == 1:
-                if self._check_pivot_low(buf_l, frac_idx, fl):
+                if is_pivot_low(buf_l, frac_idx, fl):
                     actual_bar = i - fl
                     if actual_bar - self._tri_bar <= self.step_window:
                         self._state = 2
@@ -528,7 +480,7 @@ class StreamingAPlusSignal:
                         self._broke_at = -1
 
             if self._direction == -1:
-                if self._check_pivot_high(buf_h, frac_idx, fl):
+                if is_pivot_high(buf_h, frac_idx, fl):
                     actual_bar = i - fl
                     if actual_bar - self._tri_bar <= self.step_window:
                         self._state = 2
@@ -638,26 +590,3 @@ class StreamingAPlusSignal:
                     return True
         return False
 
-    @staticmethod
-    def _check_pivot_high(arr: list, idx: int, lb: int) -> bool:
-        if idx < lb or idx + lb >= len(arr):
-            return False
-        val = arr[idx]
-        for j in range(idx - lb, idx + lb + 1):
-            if j == idx:
-                continue
-            if arr[j] >= val:
-                return False
-        return True
-
-    @staticmethod
-    def _check_pivot_low(arr: list, idx: int, lb: int) -> bool:
-        if idx < lb or idx + lb >= len(arr):
-            return False
-        val = arr[idx]
-        for j in range(idx - lb, idx + lb + 1):
-            if j == idx:
-                continue
-            if arr[j] <= val:
-                return False
-        return True

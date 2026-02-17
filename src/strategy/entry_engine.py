@@ -13,7 +13,7 @@ When an A+ signal fires with score >= threshold:
 
 from __future__ import annotations
 
-from decimal import Decimal, ROUND_DOWN, ROUND_HALF_UP
+from decimal import ROUND_DOWN, ROUND_HALF_UP, Decimal
 
 from config import EntryParams
 from models import GridLevel, InstrumentInfo, SignalDirection, SignalScore

@@ -16,14 +16,11 @@ from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
-import pandas_ta as ta
 
 from config import BotConfig
 from connectors.base import ExchangeConnector
-from indicators.aplus_signal import compute_aplus_signals
-from indicators.kama import compute_kama_full
 from indicators.resampler import klines_to_df, resample_ohlcv
-from indicators.tp_rsi_v2 import compute_tp_rsi, detect_divergences
+from indicators.suite import compute_htf_kama, compute_indicator_suite
 from models import SignalDirection
 from scoring.signal_scorer import score_signal
 
@@ -100,77 +97,30 @@ class MultiCoinScanner:
             return result
 
         close = df_8m["close"]
-        high = df_8m["high"]
-        low = df_8m["low"]
         volume = df_8m["volume"]
 
-        # Run A+ state machine (fast — just checks for signals)
-        aplus = compute_aplus_signals(
-            df_8m,
-            pivot_lookback=cfg.aplus.pivot_lookback,
-            fractal_len=cfg.aplus.fractal_len,
-            step_window=cfg.aplus.step_window,
-            gate_max_age=cfg.aplus.gate_max_age,
-            ema_fast_len=cfg.aplus.ema_fast,
-            ema_slow_len=cfg.aplus.ema_slow,
-            break_mode=cfg.aplus.break_mode,
-            buffer_ticks=cfg.aplus.buffer_ticks,
-            need_retest=cfg.aplus.need_retest,
-            retest_lookback=cfg.aplus.retest_lookback,
-            allow_pre_cross=cfg.aplus.allow_pre_cross,
-        )
+        # Compute all indicators via shared suite
+        ind = compute_indicator_suite(df_8m, cfg)
 
         # Check last bar for signal
         last = len(df_8m) - 1
-        has_long = bool(aplus["aplus_long"][last])
-        has_short = bool(aplus["aplus_short"][last])
+        has_long = bool(ind.aplus["aplus_long"][last])
+        has_short = bool(ind.aplus["aplus_short"][last])
 
         if not has_long and not has_short:
             return result
 
-        # Signal found — compute full indicator suite
+        # Signal found
         direction = SignalDirection.LONG if has_long else SignalDirection.SHORT
-        fractal_p = float(aplus["fractal_price"][last])
+        fractal_p = float(ind.aplus["fractal_price"][last])
 
-        # TP RSI
-        tp_rsi = compute_tp_rsi(
-            close, high, low,
-            rsi_period=cfg.tp_rsi.rsi_period,
-            bb_period=cfg.tp_rsi.bb_period,
-            bb_mult=cfg.tp_rsi.bb_mult,
-            bb_sigma=cfg.tp_rsi.bb_sigma,
-            ribbon_ma_type=cfg.tp_rsi.ribbon_ma_type,
-            ribbon_pairs=cfg.tp_rsi.ribbon_pairs,
-        )
+        recent_divs = ind.div_lookup.get(last, [])
 
-        # Divergences
-        divergences = detect_divergences(
-            close, high, low, tp_rsi["rsi"],
-            pivot_lookback=cfg.tp_rsi.divergence_lookback,
-            max_range=cfg.tp_rsi.divergence_max_range,
-        )
-        recent_divs = [d for d in divergences if abs(d.bar_index - last) <= 5]
-
-        # KAMA
-        kama = compute_kama_full(
-            close,
-            er_length=cfg.kama.er_length,
-            fast_length=cfg.kama.fast_length,
-            slow_length=cfg.kama.slow_length,
-            slope_bars=cfg.kama.slope_bars,
-        )
-
-        # ATR
-        atr = ta.atr(high, low, close, length=14)
-        atr_val = float(atr.iloc[last]) if atr is not None and not np.isnan(atr.iloc[last]) else 0.0
-
-        # Volume
-        vol_ema = ta.ema(volume, length=20)
-        vol_ema_val = float(vol_ema.iloc[last]) if vol_ema is not None and not np.isnan(vol_ema.iloc[last]) else 0.0
-
-        rsi_val = float(tp_rsi["rsi"].iloc[last]) if not np.isnan(tp_rsi["rsi"].iloc[last]) else 50.0
-        ribbon = int(tp_rsi["ribbon_score"].iloc[last])
-        kama_bull = bool(kama["bullish"].iloc[last]) if not pd.isna(kama["bullish"].iloc[last]) else None
+        atr_val = float(ind.atr.iloc[last]) if not np.isnan(ind.atr.iloc[last]) else 0.0
+        vol_ema_val = float(ind.vol_ema.iloc[last]) if not np.isnan(ind.vol_ema.iloc[last]) else 0.0
+        rsi_val = float(ind.tp_rsi["rsi"].iloc[last]) if not np.isnan(ind.tp_rsi["rsi"].iloc[last]) else 50.0
+        ribbon = int(ind.tp_rsi["ribbon_score"].iloc[last])
+        kama_bull = bool(ind.kama["bullish"].iloc[last]) if not pd.isna(ind.kama["bullish"].iloc[last]) else None
 
         # Fetch HTF data for scoring
         htf_1h_bull = None
@@ -178,20 +128,18 @@ class MultiCoinScanner:
         try:
             klines_1h = await self._connector.get_klines(symbol, "60", limit=100)
             if klines_1h:
-                df_1h = klines_to_df(klines_1h)
-                kama_1h = compute_kama_full(df_1h["close"], cfg.kama.er_length,
-                                            cfg.kama.fast_length, cfg.kama.slow_length, cfg.kama.slope_bars)
-                htf_1h_bull = bool(kama_1h["bullish"].iloc[-1]) if not pd.isna(kama_1h["bullish"].iloc[-1]) else None
+                htf_arr = compute_htf_kama(klines_1h, cfg)
+                if htf_arr is not None and not np.isnan(htf_arr[-1]):
+                    htf_1h_bull = bool(htf_arr[-1])
         except Exception:
             logger.debug("Failed to fetch 1h data for %s", symbol)
 
         try:
             klines_4h = await self._connector.get_klines(symbol, "240", limit=100)
             if klines_4h:
-                df_4h = klines_to_df(klines_4h)
-                kama_4h = compute_kama_full(df_4h["close"], cfg.kama.er_length,
-                                            cfg.kama.fast_length, cfg.kama.slow_length, cfg.kama.slope_bars)
-                htf_4h_bull = bool(kama_4h["bullish"].iloc[-1]) if not pd.isna(kama_4h["bullish"].iloc[-1]) else None
+                htf_arr = compute_htf_kama(klines_4h, cfg)
+                if htf_arr is not None and not np.isnan(htf_arr[-1]):
+                    htf_4h_bull = bool(htf_arr[-1])
         except Exception:
             logger.debug("Failed to fetch 4h data for %s", symbol)
 
@@ -204,8 +152,8 @@ class MultiCoinScanner:
             rsi_value=rsi_val,
             htf_1h_kama_bullish=htf_1h_bull,
             htf_4h_kama_bullish=htf_4h_bull,
-            rsi_bullish_cross=bool(tp_rsi["bullish_cross"].iloc[last]),
-            rsi_bearish_cross=bool(tp_rsi["bearish_cross"].iloc[last]),
+            rsi_bullish_cross=bool(ind.tp_rsi["bullish_cross"].iloc[last]),
+            rsi_bearish_cross=bool(ind.tp_rsi["bearish_cross"].iloc[last]),
             volume=float(volume.iloc[last]),
             volume_ema20=vol_ema_val,
             weights=cfg.scoring,

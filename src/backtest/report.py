@@ -55,9 +55,10 @@ def print_report(result: BacktestResult, symbol: str = "") -> None:
 def plot_equity_curve(result: BacktestResult, symbol: str = "", save_path: str | None = None) -> None:
     """Plot equity curve using matplotlib."""
     try:
-        import matplotlib.pyplot as plt
-        import matplotlib.dates as mdates
         from datetime import datetime, timezone
+
+        import matplotlib.dates as mdates
+        import matplotlib.pyplot as plt
     except ImportError:
         print("matplotlib not available — skipping plot")
         return

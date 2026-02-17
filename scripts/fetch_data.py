@@ -22,6 +22,10 @@ from connectors.bybit_connector import BybitConnector
 
 logger = logging.getLogger(__name__)
 
+MAX_RETRIES = 5
+RETRY_DELAY = 3.0  # seconds between retries
+BATCH_DELAY = 0.5  # seconds between paginated requests
+
 
 async def fetch_klines_paginated(
     connector: BybitConnector,
@@ -40,9 +44,24 @@ async def fetch_klines_paginated(
 
     while remaining > 0:
         batch_limit = min(remaining, 1000)
-        klines = await connector.get_klines(
-            symbol, interval, limit=batch_limit, end=end_ms,
-        )
+
+        # Retry with backoff on rate limit
+        klines = None
+        for attempt in range(1, MAX_RETRIES + 1):
+            try:
+                klines = await connector.get_klines(
+                    symbol, interval, limit=batch_limit, end=end_ms,
+                )
+                break
+            except Exception as exc:
+                if attempt < MAX_RETRIES:
+                    delay = RETRY_DELAY * attempt
+                    logger.warning("Attempt %d/%d failed: %s — retrying in %.0fs",
+                                   attempt, MAX_RETRIES, exc, delay)
+                    await asyncio.sleep(delay)
+                else:
+                    raise
+
         if not klines:
             break
         all_klines = klines + all_klines
@@ -51,6 +70,9 @@ async def fetch_klines_paginated(
         logger.info("Fetched chunk: %d bars (total: %d/%d)", len(klines), len(all_klines), total_needed)
         if len(klines) < batch_limit:
             break
+
+        # Rate limit courtesy delay
+        await asyncio.sleep(BATCH_DELAY)
 
     # Deduplicate
     seen: set[int] = set()
@@ -89,6 +111,9 @@ async def main():
         with open(out_path, "w") as f:
             json.dump(klines, f)
         logger.info("Saved to %s (%d bars)", out_path, len(klines))
+
+        # Delay between intervals
+        await asyncio.sleep(1.0)
 
 
 if __name__ == "__main__":

@@ -100,6 +100,8 @@ class SignalScore:
             return 0.75
         elif self.total >= 50:
             return 0.5
+        elif self.total >= 35:
+            return 0.25
         return 0.0
 
 

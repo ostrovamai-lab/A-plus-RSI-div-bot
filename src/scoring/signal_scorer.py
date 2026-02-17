@@ -155,6 +155,8 @@ def score_signal(
         score.tier = "A"
     elif score.total >= 50:
         score.tier = "B"
+    elif score.total >= 35:
+        score.tier = "C"
     else:
         score.tier = "REJECT"
 

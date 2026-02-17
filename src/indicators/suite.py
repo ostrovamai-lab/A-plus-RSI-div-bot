@@ -35,7 +35,7 @@ def compute_indicator_suite(
     df_8m: pd.DataFrame,
     cfg: BotConfig,
     *,
-    div_window: int = 5,
+    div_window: int = 15,
 ) -> IndicatorSuite:
     """Compute all indicators on 8-minute OHLCV data.
 
@@ -52,6 +52,9 @@ def compute_indicator_suite(
     low = df_8m["low"]
     volume = df_8m["volume"]
 
+    # Infer tick_size from price data (minimum non-zero price increment)
+    tick_size = _infer_tick_size(close)
+
     # A+ signals
     aplus = compute_aplus_signals(
         df_8m,
@@ -66,6 +69,7 @@ def compute_indicator_suite(
         need_retest=cfg.aplus.need_retest,
         retest_lookback=cfg.aplus.retest_lookback,
         allow_pre_cross=cfg.aplus.allow_pre_cross,
+        tick_size=tick_size,
     )
 
     # TP RSI
@@ -115,6 +119,29 @@ def compute_indicator_suite(
         atr=atr,
         vol_ema=vol_ema,
     )
+
+
+def _infer_tick_size(close: pd.Series) -> float:
+    """Infer the instrument tick size from price data.
+
+    Examines non-zero price differences to find the minimum increment.
+    Falls back to a percentage-based estimate if the data is too sparse.
+    """
+    prices = close.values.astype(float)
+    diffs = np.abs(np.diff(prices))
+    nonzero = diffs[diffs > 0]
+    if len(nonzero) > 10:
+        # Use the 5th percentile of non-zero diffs as tick_size estimate
+        tick = float(np.percentile(nonzero, 5))
+        # Round to a clean decimal (e.g. 0.0001, 0.001, 0.01, 0.1)
+        if tick > 0:
+            import math
+            exp = math.floor(math.log10(tick))
+            tick = 10 ** exp
+            return tick
+    # Fallback: 0.01% of median price
+    median_price = float(np.median(prices[prices > 0]))
+    return median_price * 0.0001
 
 
 def compute_htf_kama(klines: list[dict], cfg: BotConfig) -> np.ndarray | None:

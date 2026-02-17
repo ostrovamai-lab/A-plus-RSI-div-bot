@@ -21,10 +21,15 @@ def compute_pnl(
     qty: float,
     leverage: int = 1,
 ) -> float:
-    """Compute raw PnL (before fees)."""
+    """Compute raw PnL (before fees).
+
+    NOTE: qty is expected to be the leveraged position size (notional / price).
+    The leverage parameter is kept for backward compatibility but is NOT
+    applied again — the entry engine already factors leverage into qty.
+    """
     if direction == SignalDirection.LONG:
-        return (exit_price - entry_price) * qty * leverage
-    return (entry_price - exit_price) * qty * leverage
+        return (exit_price - entry_price) * qty
+    return (entry_price - exit_price) * qty
 
 
 def compute_fee(
@@ -40,8 +45,11 @@ def compute_fee(
     Entry is always maker (limit). Exit depends on reason:
     - Market exit (sl, opposite_signal, drawdown): maker + taker
     - Limit exit (time_stop, backtest_end): maker + maker
+
+    NOTE: qty already includes leverage (notional / price), so we don't
+    multiply by leverage again.
     """
-    notional = qty * entry_price * leverage
+    notional = qty * entry_price
     if reason in MARKET_EXIT_REASONS:
         return notional * (maker_fee + taker_fee)
     return notional * (maker_fee * 2)

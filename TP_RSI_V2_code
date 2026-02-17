@@ -1,0 +1,317 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © TrendlineProject
+// Last update: October 2024 - v2.0: Fixed MA bug, added divergences, enhanced visuals, alert system
+
+//@version=5
+indicator('TP RSI v2.0', overlay=false)
+
+// === RSI SETTINGS ===
+i_rsi_group = "═══════ RSI Settings ═══════"
+src = input(close, 'Source', group=i_rsi_group)
+for_rsi = input.int(50, 'RSI Period', minval=2, group=i_rsi_group)
+for_ma = input.int(50, 'BB Period', minval=2, group=i_rsi_group)
+for_mult = input.float(1.0, 'BB Band', minval=0.1, step=0.1, group=i_rsi_group)
+
+// === RIBBON SETTINGS ===
+i_ribbon_group = "═══════ Ribbon Settings ═══════"
+matype = input.string('EMA', 'MA Type', options=['EMA', 'SMA', 'WMA', 'HMA', 'RMA', 'ALMA'], group=i_ribbon_group)
+
+ma_len1 = input.int(21, "Short EMA1 Length", group=i_ribbon_group)
+ma_len2 = input.int(48, "Long EMA1 Length", group=i_ribbon_group)
+ma_len3 = input.int(51, "Short EMA2 Length", group=i_ribbon_group)
+ma_len4 = input.int(98, "Long EMA2 Length", group=i_ribbon_group)
+ma_len5 = input.int(103, "Short EMA3 Length", group=i_ribbon_group)
+ma_len6 = input.int(149, "Long EMA3 Length", group=i_ribbon_group)
+ma_len7 = input.int(155, "Short EMA4 Length", group=i_ribbon_group)
+ma_len8 = input.int(199, "Long EMA4 Length", group=i_ribbon_group)
+ma_len9 = input.int(206, "Short EMA5 Length", group=i_ribbon_group)
+ma_len10 = input.int(499, "Long EMA5 Length", group=i_ribbon_group)
+
+showLine = input.bool(false, "Display EMA Lines", group=i_ribbon_group)
+
+// === DIVERGENCE SETTINGS ===
+i_div_group = "═══════ Divergence Settings ═══════"
+i_show_divergence = input.bool(true, "Show Divergences", group=i_div_group)
+i_show_regular = input.bool(true, "Show Regular Divergence", group=i_div_group)
+i_show_hidden = input.bool(true, "Show Hidden Divergence", group=i_div_group)
+i_pivot_lookback = input.int(5, "Pivot Lookback", minval=1, maxval=20, group=i_div_group)
+i_max_lookback = input.int(60, "Max Lookback Range", minval=10, maxval=200, group=i_div_group)
+
+// === STYLE SETTINGS ===
+i_style_group = "═══════ Style Settings ═══════"
+i_ribbon_style = input.string("Gradient Fade", "Ribbon Color Style", options=["Gradient Fade", "Classic"], group=i_style_group)
+i_cloud_transparency = input.int(40, "Cloud Transparency", minval=20, maxval=90, step=5, group=i_style_group)
+i_show_bb = input.bool(true, "Show Bollinger Bands", group=i_style_group)
+i_show_ob_os = input.bool(true, "Show Overbought/Oversold Levels", group=i_style_group)
+
+// Custom colors
+i_bull_color = input.color(#5b9cf6, "Bullish RSI Color", group=i_style_group)
+i_bear_color = input.color(#f7525f, "Bearish RSI Color", group=i_style_group)
+i_neutral_color = input.color(#fdfdfd, "Neutral RSI Color", group=i_style_group)
+
+// === CALCULATIONS ===
+for_sigma = 0.1
+current_rsi = ta.rsi(src, for_rsi)
+basis = ta.ema(current_rsi, for_ma)
+dev = for_mult * ta.stdev(current_rsi, for_ma)
+upper = basis + dev
+lower = basis - dev
+disp_up = basis + (upper - lower) * for_sigma
+disp_down = basis - (upper - lower) * for_sigma
+
+// RSI color logic
+color_rsi = current_rsi >= disp_up ? i_bull_color : current_rsi <= disp_down ? i_bear_color : i_neutral_color
+rsi_Green = ta.crossover(current_rsi, disp_up)
+rsi_Red = ta.crossunder(current_rsi, disp_down)
+
+// === MA FUNCTION (FIXED) ===
+f_alma(src_alma, length, offset, sigma) =>
+    m = math.floor(offset * (length - 1))
+    s = length / sigma
+    norm = 0.0
+    sum = 0.0
+    for i = 0 to length - 1
+        weight = math.exp(-1 * math.pow(i - m, 2) / (2 * math.pow(s, 2)))
+        norm := norm + weight
+        sum := sum + src_alma[length - 1 - i] * weight
+    sum / norm
+
+f_ma(malen) =>
+    float result = na
+    if matype == 'EMA'
+        result := ta.ema(current_rsi, malen)
+    else if matype == 'SMA'
+        result := ta.sma(current_rsi, malen)
+    else if matype == 'WMA'
+        result := ta.wma(current_rsi, malen)
+    else if matype == 'HMA'
+        result := ta.hma(current_rsi, malen)
+    else if matype == 'RMA'
+        result := ta.rma(current_rsi, malen)
+    else if matype == 'ALMA'
+        result := f_alma(current_rsi, malen, 0.85, 6)
+    result
+
+// Calculate MAs
+mashort1 = f_ma(ma_len1)
+malong1 = f_ma(ma_len2)
+mashort2 = f_ma(ma_len3)
+malong2 = f_ma(ma_len4)
+mashort3 = f_ma(ma_len5)
+malong3 = f_ma(ma_len6)
+mashort4 = f_ma(ma_len7)
+malong4 = f_ma(ma_len8)
+mashort5 = f_ma(ma_len9)
+malong5 = f_ma(ma_len10)
+
+// === RIBBON COLORS (QUANTUM STYLE) ===
+f_get_ribbon_colors(style, is_bullish, layer) =>
+    if style == "Gradient Fade"
+        bull_colors = array.from(#00d4ff, #00b8e6, #0099cc, #007fb3, #006699)
+        bear_colors = array.from(#ff0066, #e6005c, #cc0052, #b30047, #99003d)
+        is_bullish ? array.get(bull_colors, layer - 1) : array.get(bear_colors, layer - 1)
+    else
+        is_bullish ? #026a9e : #8d3e68
+
+cloudcolour1 = f_get_ribbon_colors(i_ribbon_style, mashort1 >= malong1, 1)
+cloudcolour2 = f_get_ribbon_colors(i_ribbon_style, mashort2 >= malong2, 2)
+cloudcolour3 = f_get_ribbon_colors(i_ribbon_style, mashort3 >= malong3, 3)
+cloudcolour4 = f_get_ribbon_colors(i_ribbon_style, mashort4 >= malong4, 4)
+cloudcolour5 = f_get_ribbon_colors(i_ribbon_style, mashort5 >= malong5, 5)
+
+mashortcolor1 = f_get_ribbon_colors(i_ribbon_style, mashort1 >= mashort1[1], 1)
+mashortcolor2 = f_get_ribbon_colors(i_ribbon_style, mashort2 >= mashort2[1], 2)
+mashortcolor3 = f_get_ribbon_colors(i_ribbon_style, mashort3 >= mashort3[1], 3)
+mashortcolor4 = f_get_ribbon_colors(i_ribbon_style, mashort4 >= mashort4[1], 4)
+mashortcolor5 = f_get_ribbon_colors(i_ribbon_style, mashort5 >= mashort5[1], 5)
+
+malongcolor1 = f_get_ribbon_colors(i_ribbon_style, malong1 >= malong1[1], 1)
+malongcolor2 = f_get_ribbon_colors(i_ribbon_style, malong2 >= malong2[1], 2)
+malongcolor3 = f_get_ribbon_colors(i_ribbon_style, malong3 >= malong3[1], 3)
+malongcolor4 = f_get_ribbon_colors(i_ribbon_style, malong4 >= malong4[1], 4)
+malongcolor5 = f_get_ribbon_colors(i_ribbon_style, malong5 >= malong5[1], 5)
+
+// === DIVERGENCE DETECTION ===
+ph = ta.pivothigh(current_rsi, i_pivot_lookback, i_pivot_lookback)
+pl = ta.pivotlow(current_rsi, i_pivot_lookback, i_pivot_lookback)
+
+ph_price = ta.pivothigh(high, i_pivot_lookback, i_pivot_lookback)
+pl_price = ta.pivotlow(low, i_pivot_lookback, i_pivot_lookback)
+
+// Store pivot points
+var float[] rsi_highs = array.new_float(0)
+var int[] rsi_high_bars = array.new_int(0)
+var float[] rsi_lows = array.new_float(0)
+var int[] rsi_low_bars = array.new_int(0)
+
+var float[] price_highs = array.new_float(0)
+var int[] price_high_bars = array.new_int(0)
+var float[] price_lows = array.new_float(0)
+var int[] price_low_bars = array.new_int(0)
+
+// Store RSI pivots
+if not na(ph)
+    array.unshift(rsi_highs, ph)
+    array.unshift(rsi_high_bars, bar_index - i_pivot_lookback)
+    if array.size(rsi_highs) > 10
+        array.pop(rsi_highs)
+        array.pop(rsi_high_bars)
+
+if not na(pl)
+    array.unshift(rsi_lows, pl)
+    array.unshift(rsi_low_bars, bar_index - i_pivot_lookback)
+    if array.size(rsi_lows) > 10
+        array.pop(rsi_lows)
+        array.pop(rsi_low_bars)
+
+// Store price pivots
+if not na(ph_price)
+    array.unshift(price_highs, ph_price)
+    array.unshift(price_high_bars, bar_index - i_pivot_lookback)
+    if array.size(price_highs) > 10
+        array.pop(price_highs)
+        array.pop(price_high_bars)
+
+if not na(pl_price)
+    array.unshift(price_lows, pl_price)
+    array.unshift(price_low_bars, bar_index - i_pivot_lookback)
+    if array.size(price_lows) > 10
+        array.pop(price_lows)
+        array.pop(price_low_bars)
+
+// Divergence detection function
+f_check_divergence() =>
+    bool bull_regular = false
+    bool bear_regular = false
+    bool bull_hidden = false
+    bool bear_hidden = false
+    
+    // Only check on new pivot formation
+    is_new_low = not na(pl)
+    is_new_high = not na(ph)
+    
+    // Bullish Regular: Price LL, RSI HL
+    if is_new_low and array.size(rsi_lows) >= 2 and array.size(price_lows) >= 2
+        curr_rsi_low = array.get(rsi_lows, 0)
+        prev_rsi_low = array.get(rsi_lows, 1)
+        curr_price_low = array.get(price_lows, 0)
+        prev_price_low = array.get(price_lows, 1)
+        
+        curr_bar = array.get(rsi_low_bars, 0)
+        prev_bar = array.get(rsi_low_bars, 1)
+        
+        if (bar_index - prev_bar) <= i_max_lookback and (bar_index - prev_bar) > i_pivot_lookback
+            if curr_price_low < prev_price_low and curr_rsi_low > prev_rsi_low
+                bull_regular := true
+    
+    // Bearish Regular: Price HH, RSI LH
+    if is_new_high and array.size(rsi_highs) >= 2 and array.size(price_highs) >= 2
+        curr_rsi_high = array.get(rsi_highs, 0)
+        prev_rsi_high = array.get(rsi_highs, 1)
+        curr_price_high = array.get(price_highs, 0)
+        prev_price_high = array.get(price_highs, 1)
+        
+        curr_bar = array.get(rsi_high_bars, 0)
+        prev_bar = array.get(rsi_high_bars, 1)
+        
+        if (bar_index - prev_bar) <= i_max_lookback and (bar_index - prev_bar) > i_pivot_lookback
+            if curr_price_high > prev_price_high and curr_rsi_high < prev_rsi_high
+                bear_regular := true
+    
+    // Bullish Hidden: Price HL, RSI LL
+    if is_new_low and array.size(rsi_lows) >= 2 and array.size(price_lows) >= 2
+        curr_rsi_low = array.get(rsi_lows, 0)
+        prev_rsi_low = array.get(rsi_lows, 1)
+        curr_price_low = array.get(price_lows, 0)
+        prev_price_low = array.get(price_lows, 1)
+        
+        curr_bar = array.get(rsi_low_bars, 0)
+        prev_bar = array.get(rsi_low_bars, 1)
+        
+        if (bar_index - prev_bar) <= i_max_lookback and (bar_index - prev_bar) > i_pivot_lookback
+            if curr_price_low > prev_price_low and curr_rsi_low < prev_rsi_low
+                bull_hidden := true
+    
+    // Bearish Hidden: Price LH, RSI HH
+    if is_new_high and array.size(rsi_highs) >= 2 and array.size(price_highs) >= 2
+        curr_rsi_high = array.get(rsi_highs, 0)
+        prev_rsi_high = array.get(rsi_highs, 1)
+        curr_price_high = array.get(price_highs, 0)
+        prev_price_high = array.get(price_highs, 1)
+        
+        curr_bar = array.get(rsi_high_bars, 0)
+        prev_bar = array.get(rsi_high_bars, 1)
+        
+        if (bar_index - prev_bar) <= i_max_lookback and (bar_index - prev_bar) > i_pivot_lookback
+            if curr_price_high < prev_price_high and curr_rsi_high > prev_rsi_high
+                bear_hidden := true
+    
+    [bull_regular, bear_regular, bull_hidden, bear_hidden]
+
+[div_bull_reg, div_bear_reg, div_bull_hid, div_bear_hid] = f_check_divergence()
+
+// Display divergences
+if i_show_divergence and i_show_regular and div_bull_reg
+    label.new(bar_index, current_rsi, "Bull\nDiv", style=label.style_label_up, color=color.new(color.green, 0), textcolor=color.white, size=size.small)
+
+if i_show_divergence and i_show_regular and div_bear_reg
+    label.new(bar_index, current_rsi, "Bear\nDiv", style=label.style_label_down, color=color.new(color.red, 0), textcolor=color.white, size=size.small)
+
+if i_show_divergence and i_show_hidden and div_bull_hid
+    label.new(bar_index, current_rsi, "H.Bull\nDiv", style=label.style_label_up, color=color.new(color.green, 50), textcolor=color.white, size=size.small)
+
+if i_show_divergence and i_show_hidden and div_bear_hid
+    label.new(bar_index, current_rsi, "H.Bear\nDiv", style=label.style_label_down, color=color.new(color.red, 50), textcolor=color.white, size=size.small)
+
+// === VISUALIZATION ===
+// RSI line
+plot(current_rsi, color=color_rsi, linewidth=1, title="RSI")
+
+// Ribbon
+mashortline1 = plot(mashort1, color=showLine ? color.new(mashortcolor1, 0) : na, linewidth=1, title="Short EMA1")
+mashortline2 = plot(mashort2, color=showLine ? color.new(mashortcolor2, 0) : na, linewidth=1, title="Short EMA2")
+mashortline3 = plot(mashort3, color=showLine ? color.new(mashortcolor3, 0) : na, linewidth=1, title="Short EMA3")
+mashortline4 = plot(mashort4, color=showLine ? color.new(mashortcolor4, 0) : na, linewidth=1, title="Short EMA4")
+mashortline5 = plot(mashort5, color=showLine ? color.new(mashortcolor5, 0) : na, linewidth=1, title="Short EMA5")
+
+malongline1 = plot(malong1, color=showLine ? color.new(malongcolor1, 0) : na, linewidth=3, title="Long EMA1")
+malongline2 = plot(malong2, color=showLine ? color.new(malongcolor2, 0) : na, linewidth=3, title="Long EMA2")
+malongline3 = plot(malong3, color=showLine ? color.new(malongcolor3, 0) : na, linewidth=3, title="Long EMA3")
+malongline4 = plot(malong4, color=showLine ? color.new(malongcolor4, 0) : na, linewidth=3, title="Long EMA4")
+malongline5 = plot(malong5, color=showLine ? color.new(malongcolor5, 0) : na, linewidth=3, title="Long EMA5")
+
+fill(mashortline1, malongline1, color=color.new(cloudcolour1, i_cloud_transparency - 10), title="Cloud1")
+fill(mashortline2, malongline2, color=color.new(cloudcolour2, i_cloud_transparency - 5), title="Cloud2")
+fill(mashortline3, malongline3, color=color.new(cloudcolour3, i_cloud_transparency), title="Cloud3")
+fill(mashortline4, malongline4, color=color.new(cloudcolour4, i_cloud_transparency + 5), title="Cloud4")
+fill(mashortline5, malongline5, color=color.new(cloudcolour5, i_cloud_transparency + 10), title="Cloud5")
+
+// Bollinger Bands
+length = input.int(50, 'BB Period', group='BB Settings')
+mult = input.float(2.0, 'BB Band', group='BB Settings')
+basi = ta.sma(current_rsi, length)
+dev1 = mult * ta.stdev(current_rsi, length)
+upper1 = basi + dev1
+lower1 = basi - dev1
+
+p1 = plot(i_show_bb ? upper1 : na, "Upper BB", color=color.new(#ec40f9, 70), linewidth=1)
+p2 = plot(i_show_bb ? lower1 : na, "Lower BB", color=color.new(#3179f5, 70), linewidth=1)
+
+// OB/OS levels (Quantum style)
+h1 = hline(i_show_ob_os ? 70 : na, color=color.new(color.red, 70), linewidth=1, linestyle=hline.style_dotted, title="Overbought")
+h2 = hline(i_show_ob_os ? 30 : na, color=color.new(color.green, 70), linewidth=1, linestyle=hline.style_dotted, title="Oversold")
+hline(50, color=color.new(color.gray, 80), linewidth=1, linestyle=hline.style_solid, title="Midline")
+
+// === ALERTS ===
+alertcondition(rsi_Green, "RSI Bullish Signal", "TP RSI: RSI crossed above upper threshold")
+alertcondition(rsi_Red, "RSI Bearish Signal", "TP RSI: RSI crossed below lower threshold")
+
+alertcondition(div_bull_reg, "Bullish Divergence", "TP RSI: Regular bullish divergence detected")
+alertcondition(div_bear_reg, "Bearish Divergence", "TP RSI: Regular bearish divergence detected")
+
+alertcondition(div_bull_hid, "Hidden Bullish Divergence", "TP RSI: Hidden bullish divergence detected")
+alertcondition(div_bear_hid, "Hidden Bearish Divergence", "TP RSI: Hidden bearish divergence detected")
+
+alertcondition(ta.cross(current_rsi, 70), "RSI Overbought", "TP RSI: RSI crossed overbought level (70)")
+alertcondition(ta.cross(current_rsi, 30), "RSI Oversold", "TP RSI: RSI crossed oversold level (30)")
+

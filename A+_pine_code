@@ -1,0 +1,317 @@
+//@version=5
+indicator("Asignal_reverse_Ostrovamoi [A+ Circles] — LTF!", shorttitle="A rev [A+]", overlay=true,
+     max_lines_count=500, max_labels_count=500, max_boxes_count=500)
+
+// ============================== Inputs ============================== //
+length          = input.int(14,  "Pivot Lookback")
+area            = input.string("Wick Extremity", "Swing Area", options=["Wick Extremity","Full Range"])
+intraPrecision  = input.bool(false, "Intrabar Precision", inline="intrabar")
+intrabarTf      = input.timeframe("1", "", inline="intrabar")
+filterOptions   = input.string("Count", "Filter Areas By", options=["Count","Volume"], inline="filter")
+filterValue     = input.float(0.0, "", inline="filter")
+
+// Style
+g_style     = "Style"
+showTop     = input.bool(true,  "Swing High", inline="top",  group=g_style)
+topCss      = input.color(color.red, "", inline="top", group=g_style)
+topAreaCss  = input.color(color.new(color.red, 50),  "Area", inline="top", group=g_style)
+showBtm     = input.bool(true,  "Swing Low",  inline="btm", group=g_style)
+btmCss      = input.color(color.teal, "", inline="btm", group=g_style)
+btmAreaCss  = input.color(color.new(color.teal, 50), "Area", inline="btm", group=g_style)
+labelSize   = input.string("Tiny", "Labels Size", options=["Tiny","Small","Normal"], group=g_style)
+
+// Alerts & Signals
+g_alerts                = "Alerts & Signals"
+showStartLongDCASignal  = input.bool(true,  "Show 'Зелений_Трикутник'",  inline="long_dca",  group=g_alerts)
+showStartShortDCASignal = input.bool(true,  "Show 'Червоний_Трикутник'", inline="short_dca", group=g_alerts)
+showAPlusSignal         = input.bool(true,  "Show 'A+' Circles", group=g_alerts)
+emaFastLen              = input.int(3,      "Fast EMA Length (A+)",  minval=1, group=g_alerts)
+emaSlowLen              = input.int(21,     "Slow EMA Length (A+)",  minval=1, group=g_alerts)
+
+// --- A+: фрактал поточного ТФ + керування станами ---
+g_aplus        = "A+ Conditions"
+curFrLen       = input.int(3,   "Current TF Fractal Length", minval=1, group=g_aplus)
+stepWindow     = input.int(50,  "Max Bars Between Steps (triangle→fractal / fractal→cross)", minval=1, group=g_aplus)
+gateMaxAgeBars = input.int(20,  "Max Bars From Fractal To A+ (fresh gate window)", minval=1, group=g_aplus)
+bodyMode       = input.string("CloseOnly", "Body filter", options=["None","CloseOnly","Body"], group=g_aplus)
+
+// ВАЖЛИВО: сигнал тільки після ретесту slow EMA
+needRetest     = input.bool(true, "Require slow EMA retest before signal", group=g_aplus)
+retestLookbk   = input.int(20, "Retest Lookback Bars", minval=1, group=g_aplus)
+
+allowPreCross  = input.bool(true, "Allow early cross (between triangle & fractal)", group=g_aplus)
+
+// Режим зламу гейта + «reclaim»
+breakMode     = input.string("Wick+Buffer", "Break mode", options=["Wick","Close","Wick+Buffer"], group=g_aplus)
+fractBufTicks = input.int(1, "Fractal break buffer (ticks)", minval=0, group=g_aplus)
+reclaimEnable = input.bool(true, "Allow gate reclaim", group=g_aplus)
+reclaimBars   = input.int(6, "Reclaim window (bars)", minval=1, group=g_aplus)
+
+// ================= LTF Liquidity Sweep (для A+) ================= //
+g_ltf = "LTF Liquidity Sweep (extra condition for A+)"
+requireLtfSweep = input.bool(false, "Require LTF 'triangle' sweep for A+", group=g_ltf)
+ltfTf           = input.timeframe("1", "Lower timeframe", group=g_ltf)
+ltfMaxAge       = input.int(10, "Max age of LTF sweep (bars on current TF)", minval=1, group=g_ltf)
+showLtfMarks    = input.bool(false, "Show LTF sweep marks (debug)", group=g_ltf)
+
+// Debug / visuals
+g_dbg          = "Debug / Visuals"
+showGateMarker = input.bool(true, "Show marker on fractal-gate (dot)", group=g_dbg)
+plotDebug      = input.bool(false, "Plot debug tiny markers for states", group=g_dbg)
+
+// ==================== Lower TF buffers (optional) ==================== //
+n = bar_index
+get_data()=> [high, low, volume]
+[h, l, v] = request.security_lower_tf(syminfo.tickerid, intrabarTf, get_data())
+
+// ============================== Helpers ============================== //
+get_counts(condition, top, btm)=>
+    var int   count = 0
+    var float vol   = 0.0
+    if condition
+        count := 0
+        vol   := 0.0
+    else
+        bool hasLower = false
+        array<float> volArr = na
+        array<float> hiArr  = na
+        array<float> loArr  = na
+        if intraPrecision
+            if not na(v) and not na(h) and not na(l)
+                int topSz = array.size(v)
+                if topSz > length
+                    volArr := v[length]
+                    hiArr  := h[length]
+                    loArr  := l[length]
+                    if not na(volArr) and not na(hiArr) and not na(loArr)
+                        if array.size(volArr) > 0 and array.size(hiArr) > 0 and array.size(loArr) > 0
+                            hasLower := true
+        if hasLower
+            int inner = math.min(array.size(volArr), math.min(array.size(hiArr), array.size(loArr)))
+            for i = 0 to inner - 1
+                float volEl = array.get(volArr, i)
+                float hi    = array.get(hiArr,  i)
+                float lo    = array.get(loArr,  i)
+                bool inZone = not na(top) and not na(btm) and lo < top and hi > btm
+                vol   += inZone ? volEl : 0
+                count += inZone ? 1     : 0
+        else
+            bool enough = bar_index > length and not na(top) and not na(btm)
+            bool hit    = enough and (low[length] < top) and (high[length] > btm)
+            vol   += hit ? volume[length] : 0
+            count += hit ? 1              : 0
+    [count, vol]
+
+set_label(count, vol, x, y, css, lbl_style)=>
+    var label lbl = na
+    lbl_sz = labelSize == "Small" ? size.small : labelSize == "Normal" ? size.normal : size.tiny
+    target = filterOptions == "Count" ? count : vol
+    if ta.crossover(target, filterValue) and not na(x) and not na(y)
+        lbl := label.new(x=x, y=y, text=str.tostring(vol, format.volume), style=lbl_style, size=lbl_sz,
+                         color=color.new(color.black, 100), textcolor=css, xloc=xloc.bar_index)
+    if target > filterValue and not na(lbl)
+        label.set_text(lbl, str.tostring(vol, format.volume))
+        label.set_x(lbl, x)
+        label.set_y(lbl, y)
+
+set_level2(condition, crossed, value, count, vol, css, prev)=>
+    var line out = prev
+    target = filterOptions == "Count" ? count : vol
+    if condition and not na(value)
+        out := line.new(n - length, value, n, value, color=na, xloc=xloc.bar_index)
+    if not na(out)
+        line.set_x2(out, n)
+        if crossed
+            line.set_style(out, line.style_dashed)
+        line.set_color(out, target > filterValue ? css : na)
+    out
+
+set_zone2(condition, x, top, btm, count, vol, css, prev)=>
+    var box out = prev
+    target = filterOptions == "Count" ? count : vol
+    if condition and ta.crossover(target, filterValue) and not na(x) and not na(top) and not na(btm)
+        out := box.new(x, top, x + count, btm, border_color=na, bgcolor=css, xloc=xloc.bar_index)
+    if target > filterValue and not na(out) and not na(x)
+        box.set_right(out, x + count)
+    out
+
+// =========================== Pivot processing ========================== //
+phPrice = ta.pivothigh(high, length, length)
+plPrice = ta.pivotlow(low,  length, length)
+
+// ---- High swing ----
+var float ph_top = na
+var float ph_btm = na
+var bool  ph_crossed = false
+var int   ph_x1 = na
+var line  ph_lvl = na
+var box   ph_bx  = na
+
+[ph_count, ph_vol] = get_counts(not na(phPrice), ph_top, ph_btm)
+if not na(phPrice) and showTop
+    ph_top     := high[length]
+    ph_btm     := area == "Wick Extremity" ? math.max(close[length], open[length]) : low[length]
+    ph_x1      := n - length
+    ph_crossed := false
+else
+    ph_crossed := (not na(ph_top) and close > ph_top) or ph_crossed
+
+if showTop
+    ph_bx  := set_zone2(not na(phPrice), ph_x1, ph_top, ph_btm, ph_count, ph_vol, topAreaCss, ph_bx)
+    ph_lvl := set_level2(not na(phPrice), ph_crossed, ph_top, ph_count, ph_vol, topCss, ph_lvl)
+    set_label(ph_count, ph_vol, ph_x1, ph_top, topCss, label.style_label_down)
+
+// ---- Low swing ----
+var float pl_top = na
+var float pl_btm = na
+var bool  pl_crossed = false
+var int   pl_x1 = na
+var line  pl_lvl = na
+var box   pl_bx  = na
+
+[pl_count, pl_vol] = get_counts(not na(plPrice), pl_top, pl_btm)
+if not na(plPrice) and showBtm
+    pl_top     := area == "Wick Extremity" ? math.min(close[length], open[length]) : high[length]
+    pl_btm     := low[length]
+    pl_x1      := n - length
+    pl_crossed := false
+else
+    pl_crossed := (not na(pl_btm) and close < pl_btm) or pl_crossed
+
+if showBtm
+    pl_bx  := set_zone2(not na(plPrice), pl_x1, pl_top, pl_btm, pl_count, pl_vol, btmAreaCss, pl_bx)
+    pl_lvl := set_level2(not na(plPrice), pl_crossed, pl_btm, pl_count, pl_vol, btmCss, pl_lvl)
+    set_label(pl_count, pl_vol, pl_x1, pl_btm, btmCss, label.style_label_up)
+
+// ===================== DCA triangles (liquidity break) ===================== //
+startLongDCASignal0  = pl_crossed and not nz(pl_crossed[1])
+startShortDCASignal0 = ph_crossed and not nz(ph_crossed[1])
+
+plotshape(showStartLongDCASignal  and startLongDCASignal0,  title="Зелений_Трикутник",
+          style=shape.triangleup,   location=location.belowbar, color=btmCss, size=size.tiny, offset=0)
+plotshape(showStartShortDCASignal and startShortDCASignal0, title="Червоний_Трикутник",
+          style=shape.triangledown, location=location.abovebar, color=topCss, size=size.tiny, offset=0)
+
+alertcondition(startLongDCASignal0,  "Зелений_Трикутник",  "Support broken. Start Long DCA at {{close}}")
+alertcondition(startShortDCASignal0, "Червоний_Трикутник", "Resistance broken. Start Short DCA at {{close}}")
+
+// ========================== A+ logic (state machine) ========================== //
+emaFast = ta.ema(close, emaFastLen)   // 3
+emaSlow = ta.ema(close, emaSlowLen)   // 21
+plot(emaFast, title="EMA Fast (3)",  color=color.new(color.green,  0), linewidth=2)
+plot(emaSlow, title="EMA Slow (21)", color=color.new(color.orange, 0), linewidth=2)
+
+// 0 — idle, 1 — після трикутника чекаємо фрактал, 2 — після фракталу чекаємо крос
+var int  state = 0
+var int  dir   = 0     // +1 long, -1 short
+var int  triBar   = na
+var int  fractBar = na
+var float fractPrice = na
+var int  lastSig  = na
+var int  preCrossBarLong  = na
+var int  preCrossBarShort = na
+
+// РЕТЕСТ-маркери
+var int  retestBarLong  = na
+var int  retestBarShort = na
+
+// гейт/злам/реактивація
+var bool gateActive = false
+var int  brokeAt    = na
+
+// --- вхід у state=1 ---
+if startLongDCASignal0
+    state := 1
+    dir := +1
+    triBar := bar_index
+    preCrossBarLong := na
+    preCrossBarShort := na
+    fractBar := na
+    fractPrice := na
+    gateActive := false
+    brokeAt := na
+    retestBarLong := na
+    retestBarShort := na
+
+if startShortDCASignal0
+    state := 1
+    dir := -1
+    triBar := bar_index
+    preCrossBarLong := na
+    preCrossBarShort := na
+    fractBar := na
+    fractPrice := na
+    gateActive := false
+    brokeAt := na
+    retestBarLong := na
+    retestBarShort := na
+
+// ранній крос (поки чекаємо фрактал)
+if state == 1
+    if ta.crossover(emaFast, emaSlow)
+        preCrossBarLong := bar_index
+    if ta.crossunder(emaFast, emaSlow)
+        preCrossBarShort := bar_index
+
+// якщо фрактал не з’явився у відведене вікно — скидання
+if state == 1 and bar_index - triBar > stepWindow
+    state := 0
+    dir := 0
+    triBar := na
+    preCrossBarLong := na
+    preCrossBarShort := na
+    fractBar := na
+    fractPrice := na
+    gateActive := false
+    brokeAt := na
+    retestBarLong := na
+    retestBarShort := na
+
+// підтверджені фрактали поточного ТФ
+plCur = ta.pivotlow(low,  curFrLen, curFrLen)
+phCur = ta.pivothigh(high, curFrLen, curFrLen)
+newPl = not na(plCur) and na(plCur[1])
+newPh = not na(phCur) and na(phCur[1])
+
+// state=2 на правильному фракталі (в межах stepWindow від трикутника)
+if state == 1 and dir == +1 and newPl and (bar_index - curFrLen) - triBar <= stepWindow
+    state := 2
+    fractBar   := bar_index - curFrLen
+    fractPrice := low[curFrLen]
+    gateActive := true
+    brokeAt    := na
+    retestBarLong := na
+
+if state == 1 and dir == -1 and newPh and (bar_index - curFrLen) - triBar <= stepWindow
+    state := 2
+    fractBar   := bar_index - curFrLen
+    fractPrice := high[curFrLen]
+    gateActive := true
+    brokeAt    := na
+    retestBarShort := na
+
+// старіння гейта
+gateTooOld = state==2 and not na(fractBar) and (bar_index - fractBar > gateMaxAgeBars)
+
+// пороги з буфером у тіках (для Wick+Buffer)
+float upThresh   = na(fractPrice) ? na : fractPrice + fractBufTicks*syminfo.mintick
+float downThresh = na(fractPrice) ? na : fractPrice - fractBufTicks*syminfo.mintick
+
+// злам гейта
+bool brokeNow =
+     state==2 and gateActive and not na(fractPrice) and
+     (
+       (dir==+1 and (
+           (breakMode=="Wick"        and low  <  fractPrice) or
+           (breakMode=="Close"       and close < fractPrice) or
+           (breakMode=="Wick+Buffer" and low  <  downThresh)
+       ))
+       or
+       (dir==-1 and (
+           (breakMode=="Wick"        and high >  fractPrice) or
+           (breakMode=="Close"       and close > fractPrice) or
+           (breakMode=="Wick+Buffer" and high >  upThresh)
+       ))
+     )
+
+

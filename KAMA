@@ -1,0 +1,13 @@
+//@version=6
+indicator("Kaufman's Adaptive Moving Average", "KAMA", true, timeframe = "", timeframe_gaps = true)
+
+import TradingView/ta/11 as TVta
+
+// Inputs
+float sourceInput  = input.source(close, "Source")
+int   erLenInput   = input.int(10, "ER length",   1)
+int   fastLenInput = input.int(2,  "Fast length", 1)
+int   slowLenInput = input.int(30, "Slow length", 1)
+
+// Calculate and plot the KAMA value.
+plot(TVta.kama(sourceInput, erLenInput, fastLenInput, slowLenInput), "KAMA")

@@ -57,7 +57,7 @@ def plot_equity_curve(result: BacktestResult, symbol: str = "", save_path: str |
     try:
         import matplotlib.pyplot as plt
         import matplotlib.dates as mdates
-        from datetime import datetime
+        from datetime import datetime, timezone
     except ImportError:
         print("matplotlib not available — skipping plot")
         return
@@ -66,7 +66,7 @@ def plot_equity_curve(result: BacktestResult, symbol: str = "", save_path: str |
         print("No equity data to plot")
         return
 
-    dates = [datetime.utcfromtimestamp(ts / 1000) for ts in result.timestamps]
+    dates = [datetime.fromtimestamp(ts / 1000, tz=timezone.utc) for ts in result.timestamps]
 
     fig, ax = plt.subplots(figsize=(14, 6))
     ax.plot(dates, result.equity_curve, linewidth=1, color="#2196F3")

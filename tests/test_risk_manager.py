@@ -62,10 +62,11 @@ class TestRiskManager:
         assert base == pytest.approx(1000 * 2.0)
 
         # After big loss: equity 0.1x → sqrt(0.1)=0.32 → clamped to 0.5
+        # But equity clamp limits to current_equity (100), not 1000 * 0.5 = 500
         rm2 = RiskManager(initial_capital=1000, reinvest=True, min_scale=0.5, max_scale=2.0)
         rm2.update_equity(-900)
         base2 = rm2.compute_base_size_usd(1.0)
-        assert base2 == pytest.approx(1000 * 0.5)
+        assert base2 == pytest.approx(100.0)  # clamped to available equity
 
     def test_halted_returns_zero(self):
         """When halted, position size should be zero."""

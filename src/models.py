@@ -164,6 +164,11 @@ class Trade:
     grid_fills: int = 0     # how many grid levels filled
     pyramid_level: int = 0  # 0=initial, 1-2=pyramids
 
+    @property
+    def net_pnl(self) -> float:
+        """PnL after fees."""
+        return self.pnl - self.fee
+
 
 @dataclass
 class BacktestResult:

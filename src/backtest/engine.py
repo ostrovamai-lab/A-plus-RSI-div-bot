@@ -153,6 +153,8 @@ def run_backtest(
     open_positions: list[dict] = []
     # Grid orders awaiting fill
     pending_grids: list[dict] = []
+    # Monotonic position ID counter (avoids id() memory reuse bugs)
+    _next_pos_id = 0
 
     close_arr = close.values.astype(float)
     high_arr = high.values.astype(float)
@@ -185,7 +187,7 @@ def run_backtest(
                     risk.update_equity(trade.pnl - trade.fee)
                     open_positions.remove(pos)
                     # Cancel associated grid orders
-                    pending_grids = [g for g in pending_grids if g.get("pos_id") != id(pos)]
+                    pending_grids = [g for g in pending_grids if g.get("pos_id") != pos["pos_id"]]
 
         # ── 5b. Check grid limit fills ──
         for grid in list(pending_grids):
@@ -198,7 +200,7 @@ def run_backtest(
             if filled:
                 # Find associated position and add fill
                 for pos in open_positions:
-                    if id(pos) == grid.get("pos_id"):
+                    if pos["pos_id"] == grid.get("pos_id"):
                         pos["fills"].append((grid["price"], grid["qty"]))
                         pos["grid_fills"] += 1
                         break
@@ -229,7 +231,7 @@ def run_backtest(
                     result.trades.append(trade)
                     risk.update_equity(trade.pnl - trade.fee)
                     open_positions.remove(pos)
-                    pending_grids = [g for g in pending_grids if g.get("pos_id") != id(pos)]
+                    pending_grids = [g for g in pending_grids if g.get("pos_id") != pos["pos_id"]]
 
             # Score the signal
             rsi_val = float(tp_rsi["rsi"].iloc[i]) if not np.isnan(tp_rsi["rsi"].iloc[i]) else 50.0
@@ -285,7 +287,9 @@ def run_backtest(
             sl = compute_stop_loss(sig_dir, fractal_p, cfg.entry.sl_buffer_pct)
 
             # Open position (first grid level fills immediately at signal price)
+            _next_pos_id += 1
             pos = {
+                "pos_id": _next_pos_id,
                 "direction": sig_dir,
                 "symbol": symbol,
                 "open_bar": i,
@@ -300,7 +304,7 @@ def run_backtest(
             # Remaining grid levels as pending orders
             for gl in grid_levels[1:]:
                 pending_grids.append({
-                    "pos_id": id(pos),
+                    "pos_id": pos["pos_id"],
                     "price": gl.price,
                     "side": gl.side,
                     "qty": float(gl.qty),
@@ -315,7 +319,7 @@ def run_backtest(
                 result.trades.append(trade)
                 risk.update_equity(trade.pnl - trade.fee)
                 open_positions.remove(pos)
-                pending_grids = [g for g in pending_grids if g.get("pos_id") != id(pos)]
+                pending_grids = [g for g in pending_grids if g.get("pos_id") != pos["pos_id"]]
 
         # ── 5e. Drawdown check ──
         if risk.check_drawdown():
@@ -366,9 +370,9 @@ def _close_position(pos: dict, exit_price: float, bar_index: int, reason: str, c
 
     notional = qty * avg * cfg.leverage
     if reason in ("sl", "opposite_signal", "drawdown"):
-        fee = notional * (cfg.exit.maker_fee + cfg.exit.taker_fee)
+        fee = notional * (cfg.exit.maker_fee + cfg.exit.taker_fee)  # market exit
     else:
-        fee = notional * (cfg.exit.maker_fee + cfg.exit.taker_fee)
+        fee = notional * (cfg.exit.maker_fee * 2)  # limit exit (time_stop, backtest_end)
 
     return Trade(
         open_time=pos["open_bar"],
@@ -472,4 +476,4 @@ def _compute_stats(result: BacktestResult) -> None:
         if returns:
             avg_r = sum(returns) / len(returns)
             std_r = (sum((r - avg_r) ** 2 for r in returns) / max(len(returns) - 1, 1)) ** 0.5
-            result.sharpe_ratio = (avg_r / std_r * (252 ** 0.5)) if std_r > 0 else 0.0
+            result.sharpe_ratio = (avg_r / std_r * (365 ** 0.5)) if std_r > 0 else 0.0  # crypto: 365 days

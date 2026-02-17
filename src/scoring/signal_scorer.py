@@ -81,10 +81,11 @@ def score_signal(
         score.rsi_divergence = w.rsi_divergence * best_div_score
 
     # 3. EMA Ribbon (15 pts) — 5 layers, 0-5 score
+    clamped_ribbon = max(0, min(5, ribbon_score))
     if is_long:
-        ribbon_pct = ribbon_score / 5.0
+        ribbon_pct = clamped_ribbon / 5.0
     else:
-        ribbon_pct = (5 - ribbon_score) / 5.0
+        ribbon_pct = (5 - clamped_ribbon) / 5.0
     score.ema_ribbon = w.ema_ribbon * ribbon_pct
 
     # 4. KAMA Trend (10 pts)
@@ -129,7 +130,7 @@ def score_signal(
         score.bb_position = w.bb_position
 
     # 8. Volume (5 pts) — gradient based on volume ratio
-    if volume_ema20 > 0 and not np.isnan(volume_ema20):
+    if volume_ema20 > 0 and not np.isnan(volume_ema20) and not np.isnan(volume):
         vol_ratio = volume / volume_ema20
         if vol_ratio >= 2.0:
             score.volume = w.volume
@@ -140,12 +141,12 @@ def score_signal(
         else:
             score.volume = 0.0
 
-    # Total
-    score.total = (
+    # Total (clamped to 0-100)
+    score.total = min(100.0, (
         score.aplus_signal + score.rsi_divergence + score.ema_ribbon
         + score.kama_trend + score.rsi_position + score.htf_alignment
         + score.bb_position + score.volume
-    )
+    ))
 
     # Tier
     if score.total >= 80:

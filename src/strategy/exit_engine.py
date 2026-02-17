@@ -68,9 +68,9 @@ def check_time_stop(
 
 def check_drawdown_halt(
     current_equity: float,
-    peak_equity: float,
     initial_capital: float,
     max_drawdown_pct: float,
+    current_price: float = 0.0,
 ) -> ExitSignal | None:
     """Check if equity drawdown exceeds threshold — halt all trading.
 
@@ -82,5 +82,5 @@ def check_drawdown_halt(
 
     drawdown_pct = (initial_capital - current_equity) / initial_capital * 100
     if drawdown_pct >= max_drawdown_pct:
-        return ExitSignal(reason="drawdown", exit_price=0.0, close_all=True)
+        return ExitSignal(reason="drawdown", exit_price=current_price, close_all=True)
     return None

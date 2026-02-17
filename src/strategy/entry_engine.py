@@ -13,7 +13,7 @@ When an A+ signal fires with score >= threshold:
 
 from __future__ import annotations
 
-from decimal import Decimal, ROUND_DOWN
+from decimal import Decimal, ROUND_DOWN, ROUND_HALF_UP
 
 from config import EntryParams
 from models import GridLevel, InstrumentInfo, SignalDirection, SignalScore
@@ -75,6 +75,13 @@ def compute_entry_grid(
         qty = base_notional * Decimal(str(fib_volume)) / Decimal(str(price))
 
         if instrument_info:
+            # Round price to tick_size
+            d_price = Decimal(str(price))
+            d_price = (d_price / instrument_info.tick_size).quantize(
+                Decimal("1"), rounding=ROUND_HALF_UP
+            ) * instrument_info.tick_size
+            price = float(d_price)
+
             qty = (qty / instrument_info.qty_step).to_integral_value(
                 rounding=ROUND_DOWN
             ) * instrument_info.qty_step

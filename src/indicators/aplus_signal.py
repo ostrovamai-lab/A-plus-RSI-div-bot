@@ -219,7 +219,6 @@ def compute_aplus_signals(
             fract_price = np.nan
             gate_active = False
             broke_at = -1
-            continue
 
         # ── 7. STATE 2: Gate break detection ──
         if state == 2 and gate_active and not np.isnan(fract_price):
@@ -276,20 +275,23 @@ def compute_aplus_signals(
                     if ema_fast_arr[i] < ema_slow_arr[i] and broke_at == i:
                         has_cross = True
 
-            # Check retest condition
+            # Check retest condition — price must have touched the slow EMA
+            # Only look at bars AFTER the gate break to avoid false retests
             retest_ok = True
             if need_retest and has_cross:
                 retest_ok = False
-                if direction == 1:
-                    # Check if price touched/retested slow EMA from above
-                    for j in range(max(0, i - retest_lookback), i + 1):
-                        if low_arr[j] <= ema_slow_arr[j] * 1.002:
+                search_start = max(broke_at, i - retest_lookback)
+                for j in range(search_start, i + 1):
+                    if np.isnan(ema_slow_arr[j]):
+                        continue
+                    if direction == 1:
+                        # Long: price dipped to or below slow EMA
+                        if low_arr[j] <= ema_slow_arr[j]:
                             retest_ok = True
                             break
-                else:
-                    # Check if price touched/retested slow EMA from below
-                    for j in range(max(0, i - retest_lookback), i + 1):
-                        if high_arr[j] >= ema_slow_arr[j] * 0.998:
+                    else:
+                        # Short: price rose to or above slow EMA
+                        if high_arr[j] >= ema_slow_arr[j]:
                             retest_ok = True
                             break
 

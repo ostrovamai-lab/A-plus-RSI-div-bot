@@ -67,10 +67,10 @@ class RiskManager:
         base = self.current_equity * position_scale
 
         if self.reinvest and self.initial_capital > 0:
-            ratio = self.current_equity / self.initial_capital
-            scale = math.sqrt(max(ratio, 0.01))
-            scale = max(self.min_scale, min(self.max_scale, scale))
+            scale = self.equity_scale()
             base = self.initial_capital * scale * position_scale
+            # Clamp: never size more than available equity
+            base = min(base, self.current_equity * position_scale)
 
         return base
 

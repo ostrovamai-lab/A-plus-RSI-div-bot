@@ -87,6 +87,8 @@ class PositionManager:
         """Check if we can open a new position on this symbol."""
         if self.total_positions >= self._max_positions:
             return False
+        if len(self.positions.get(symbol, [])) >= self._max_per_coin:
+            return False
         return True
 
     def can_pyramid(self, symbol: str, direction: SignalDirection) -> bool:
@@ -173,10 +175,10 @@ class PositionManager:
 
                 # Fee: entry was maker (limit), exit depends on reason
                 notional = qty * avg_entry * leverage
-                if reason == "sl" or reason == "opposite_signal":
-                    fee = notional * (maker_fee + taker_fee)
+                if reason in ("sl", "opposite_signal", "drawdown"):
+                    fee = notional * (maker_fee + taker_fee)  # market exit
                 else:
-                    fee = notional * (maker_fee + taker_fee)
+                    fee = notional * (maker_fee * 2)  # limit exit (time_stop)
 
                 trade = Trade(
                     open_time=pos.open_bar,
@@ -210,7 +212,9 @@ class PositionManager:
         trades = []
         symbols = list(self.positions.keys())
         for symbol in symbols:
-            price = exit_price_map.get(symbol, 0.0)
+            price = exit_price_map.get(symbol)
+            if price is None or price <= 0:
+                continue
             positions = list(self.positions.get(symbol, []))
             for pos in positions:
                 trade = self.close_position(

@@ -85,12 +85,14 @@ class SignalScore:
     aplus_signal: float = 0.0
     rsi_divergence: float = 0.0
     ema_ribbon: float = 0.0
+    adx_trend: float = 0.0
     kama_trend: float = 0.0
+    ema200_position: float = 0.0
     rsi_position: float = 0.0
     htf_alignment: float = 0.0
     bb_position: float = 0.0
     volume: float = 0.0
-    tier: str = "REJECT"    # A+, A, B, REJECT
+    tier: str = "REJECT"    # A+, A, B, C, REJECT
 
     @property
     def position_scale(self) -> float:

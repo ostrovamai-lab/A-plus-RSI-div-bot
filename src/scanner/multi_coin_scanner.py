@@ -117,10 +117,16 @@ class MultiCoinScanner:
         recent_divs = ind.div_lookup.get(last, [])
 
         atr_val = float(ind.atr.iloc[last]) if not np.isnan(ind.atr.iloc[last]) else 0.0
+        atr_ema_val = float(ind.atr_ema.iloc[last]) if not np.isnan(ind.atr_ema.iloc[last]) else 0.0
         vol_ema_val = float(ind.vol_ema.iloc[last]) if not np.isnan(ind.vol_ema.iloc[last]) else 0.0
         rsi_val = float(ind.tp_rsi["rsi"].iloc[last]) if not np.isnan(ind.tp_rsi["rsi"].iloc[last]) else 50.0
         ribbon = int(ind.tp_rsi["ribbon_score"].iloc[last])
         kama_bull = bool(ind.kama["bullish"].iloc[last]) if not pd.isna(ind.kama["bullish"].iloc[last]) else None
+        adx_val = float(ind.adx.iloc[last]) if not np.isnan(ind.adx.iloc[last]) else 0.0
+        di_plus_val = float(ind.di_plus.iloc[last]) if not np.isnan(ind.di_plus.iloc[last]) else 0.0
+        di_minus_val = float(ind.di_minus.iloc[last]) if not np.isnan(ind.di_minus.iloc[last]) else 0.0
+        ema200_val = float(ind.ema200.iloc[last]) if not np.isnan(ind.ema200.iloc[last]) else 0.0
+        price = float(close.iloc[last])
 
         # Fetch HTF data for scoring
         htf_1h_bull = None
@@ -148,7 +154,12 @@ class MultiCoinScanner:
             aplus_fired=True,
             recent_divergences=recent_divs,
             ribbon_score=ribbon,
+            adx_value=adx_val,
+            di_plus=di_plus_val,
+            di_minus=di_minus_val,
             kama_bullish=kama_bull,
+            price=price,
+            ema200_value=ema200_val,
             rsi_value=rsi_val,
             htf_1h_kama_bullish=htf_1h_bull,
             htf_4h_kama_bullish=htf_4h_bull,
@@ -163,7 +174,7 @@ class MultiCoinScanner:
         result.direction = direction
         result.score = score.total
         result.fractal_price = fractal_p
-        result.signal_price = float(close.iloc[last])
+        result.signal_price = price
         result.atr_value = atr_val
         result.rsi_value = rsi_val
         result.ribbon_score = ribbon

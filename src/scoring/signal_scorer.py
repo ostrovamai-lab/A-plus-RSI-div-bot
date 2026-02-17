@@ -2,10 +2,12 @@
 
 Scoring rubric (LONG example — SHORT is mirrored):
     A+ Signal:       25 pts — A+ long fires this bar
-    RSI Divergence:  20 pts — Regular bull divergence within 5 bars
-    EMA Ribbon:      15 pts — All 5 layers bullish (short > long)
-    KAMA Trend:      10 pts — KAMA rising (3-bar slope)
-    RSI Position:    10 pts — RSI < 30 (oversold for long)
+    RSI Divergence:  15 pts — Regular bull divergence within 15 bars
+    EMA Ribbon:      10 pts — All 5 layers bullish (short > long)
+    ADX Trend:       15 pts — ADX confirms trend alignment
+    KAMA Trend:       5 pts — KAMA rising (3-bar slope)
+    EMA200 Position:  5 pts — Price above EMA200 for longs
+    RSI Position:     5 pts — RSI < 30 (oversold for long)
     HTF Alignment:   10 pts — 1h + 4h KAMA both aligned
     BB Position:      5 pts — RSI crossing above lower BB
     Volume:           5 pts — Volume > 1.5x EMA(20) vol
@@ -28,8 +30,15 @@ def score_signal(
     recent_divergences: list[Divergence] | None = None,
     # Ribbon
     ribbon_score: int = 0,
+    # ADX
+    adx_value: float = 0.0,
+    di_plus: float = 0.0,
+    di_minus: float = 0.0,
     # KAMA
     kama_bullish: bool | None = None,
+    # EMA200
+    price: float = 0.0,
+    ema200_value: float = 0.0,
     # RSI
     rsi_value: float = 50.0,
     # HTF
@@ -64,7 +73,7 @@ def score_signal(
     if aplus_fired:
         score.aplus_signal = w.aplus_signal
 
-    # 2. RSI Divergence (20 pts)
+    # 2. RSI Divergence (15 pts)
     if recent_divergences:
         best_div_score = 0.0
         for div in recent_divergences:
@@ -80,7 +89,7 @@ def score_signal(
                     best_div_score = max(best_div_score, 0.6)
         score.rsi_divergence = w.rsi_divergence * best_div_score
 
-    # 3. EMA Ribbon (15 pts) — 5 layers, 0-5 score
+    # 3. EMA Ribbon (10 pts) — 5 layers, 0-5 score
     clamped_ribbon = max(0, min(5, ribbon_score))
     if is_long:
         ribbon_pct = clamped_ribbon / 5.0
@@ -88,12 +97,48 @@ def score_signal(
         ribbon_pct = (5 - clamped_ribbon) / 5.0
     score.ema_ribbon = w.ema_ribbon * ribbon_pct
 
-    # 4. KAMA Trend (10 pts)
+    # 4. ADX Trend Context (5 pts) — reversal-aware
+    # A+ signals are reversal signals, so counter-trend entries can be valid.
+    # ADX measures trend strength: high ADX = strong trend (either direction).
+    # Reward: aligned trends (continuation) OR strong counter-trend (reversal).
+    # Penalize: weak/ambiguous trends (ADX 15-20) where direction is unclear.
+    if not np.isnan(adx_value) and not np.isnan(di_plus) and not np.isnan(di_minus):
+        trend_bullish = di_plus > di_minus
+        aligned = (is_long and trend_bullish) or (not is_long and not trend_bullish)
+
+        if adx_value >= 25:
+            # Strong trend — reward both alignment and strong reversals
+            if aligned:
+                score.adx_trend = w.adx_trend
+            else:
+                # Counter-trend reversal into strong trend — partial credit
+                score.adx_trend = w.adx_trend * 0.5
+        elif adx_value >= 15:
+            # Moderate trend — partial credit either way
+            score.adx_trend = w.adx_trend * 0.4
+        else:
+            # Ranging (ADX < 15) — mean-reversion favorable
+            score.adx_trend = w.adx_trend * 0.6
+
+    # 5. KAMA Trend (5 pts)
     if kama_bullish is not None:
         if (is_long and kama_bullish) or (not is_long and not kama_bullish):
             score.kama_trend = w.kama_trend
 
-    # 5. RSI Position (10 pts) — gradient
+    # 6. EMA200 Position (5 pts) — structural trend
+    if price > 0 and not np.isnan(ema200_value):
+        if is_long:
+            if price > ema200_value:
+                score.ema200_position = w.ema200_position
+            elif price > ema200_value * 0.99:  # Within 1%
+                score.ema200_position = w.ema200_position * 0.3
+        else:
+            if price < ema200_value:
+                score.ema200_position = w.ema200_position
+            elif price < ema200_value * 1.01:
+                score.ema200_position = w.ema200_position * 0.3
+
+    # 7. RSI Position (5 pts) — gradient
     if is_long:
         if rsi_value <= 30:
             score.rsi_position = w.rsi_position
@@ -113,7 +158,7 @@ def score_signal(
         else:
             score.rsi_position = w.rsi_position * max(0, (rsi_value - 50)) / 20.0
 
-    # 6. HTF Alignment (10 pts) — 5 pts each for 1h and 4h
+    # 8. HTF Alignment (10 pts) — 5 pts each for 1h and 4h
     htf_pts = 0.0
     if htf_1h_kama_bullish is not None:
         if (is_long and htf_1h_kama_bullish) or (not is_long and not htf_1h_kama_bullish):
@@ -123,13 +168,13 @@ def score_signal(
             htf_pts += 0.5
     score.htf_alignment = w.htf_alignment * htf_pts
 
-    # 7. BB Position (5 pts) — RSI crossing favorable BB boundary
+    # 9. BB Position (5 pts) — RSI crossing favorable BB boundary
     if is_long and rsi_bullish_cross:
         score.bb_position = w.bb_position
     elif not is_long and rsi_bearish_cross:
         score.bb_position = w.bb_position
 
-    # 8. Volume (5 pts) — gradient based on volume ratio
+    # 10. Volume (5 pts) — gradient based on volume ratio
     if volume_ema20 > 0 and not np.isnan(volume_ema20) and not np.isnan(volume):
         vol_ratio = volume / volume_ema20
         if vol_ratio >= 2.0:
@@ -144,7 +189,8 @@ def score_signal(
     # Total (clamped to 0-100)
     score.total = min(100.0, (
         score.aplus_signal + score.rsi_divergence + score.ema_ribbon
-        + score.kama_trend + score.rsi_position + score.htf_alignment
+        + score.adx_trend + score.kama_trend + score.ema200_position
+        + score.rsi_position + score.htf_alignment
         + score.bb_position + score.volume
     ))
 

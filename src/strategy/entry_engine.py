@@ -105,18 +105,28 @@ def compute_stop_loss(
     direction: SignalDirection,
     fractal_price: float,
     sl_buffer_pct: float = 0.002,
+    atr_value: float = 0.0,
+    sl_atr_multiplier: float = 0.5,
 ) -> float:
     """Compute stop loss price behind the fractal gate.
+
+    Uses the wider of percentage-based buffer or ATR-based buffer,
+    so SL adapts to current volatility regime.
 
     Args:
         direction: LONG or SHORT.
         fractal_price: Gate fractal price.
         sl_buffer_pct: Buffer as fraction of fractal price (0.002 = 0.2%).
+        atr_value: Current ATR(14) value.
+        sl_atr_multiplier: Minimum SL distance as fraction of ATR.
 
     Returns:
         Stop loss price.
     """
-    buffer = fractal_price * sl_buffer_pct
+    pct_buffer = fractal_price * sl_buffer_pct
+    atr_buffer = atr_value * sl_atr_multiplier
+    buffer = max(pct_buffer, atr_buffer)
+
     if direction == SignalDirection.LONG:
         return fractal_price - buffer
     else:

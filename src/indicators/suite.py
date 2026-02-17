@@ -28,7 +28,12 @@ class IndicatorSuite:
     div_lookup: dict[int, list[Divergence]]
     kama: dict
     atr: pd.Series
+    atr_ema: pd.Series
     vol_ema: pd.Series
+    adx: pd.Series
+    di_plus: pd.Series
+    di_minus: pd.Series
+    ema200: pd.Series
 
 
 def compute_indicator_suite(
@@ -105,10 +110,34 @@ def compute_indicator_suite(
     if atr is None:
         atr = pd.Series(0.0, index=close.index)
 
+    # ATR smoothed (for volatility regime filter)
+    atr_ema = ta.ema(atr, length=cfg.filters.atr_ema_period)
+    if atr_ema is None:
+        atr_ema = pd.Series(0.0, index=close.index)
+
     # Volume EMA
     vol_ema = ta.ema(volume, length=20)
     if vol_ema is None:
         vol_ema = pd.Series(0.0, index=volume.index)
+
+    # ADX + DI+/DI- (trend strength & direction)
+    adx_df = ta.adx(high, low, close, length=cfg.filters.adx_period)
+    if adx_df is not None:
+        adx_col = f"ADX_{cfg.filters.adx_period}"
+        dmp_col = f"DMP_{cfg.filters.adx_period}"
+        dmn_col = f"DMN_{cfg.filters.adx_period}"
+        adx_series = adx_df[adx_col]
+        di_plus = adx_df[dmp_col]
+        di_minus = adx_df[dmn_col]
+    else:
+        adx_series = pd.Series(0.0, index=close.index)
+        di_plus = pd.Series(0.0, index=close.index)
+        di_minus = pd.Series(0.0, index=close.index)
+
+    # EMA200 (structural trend)
+    ema200 = ta.ema(close, length=cfg.filters.ema200_period)
+    if ema200 is None:
+        ema200 = pd.Series(np.nan, index=close.index)
 
     return IndicatorSuite(
         aplus=aplus,
@@ -117,7 +146,12 @@ def compute_indicator_suite(
         div_lookup=div_lookup,
         kama=kama,
         atr=atr,
+        atr_ema=atr_ema,
         vol_ema=vol_ema,
+        adx=adx_series,
+        di_plus=di_plus,
+        di_minus=di_minus,
+        ema200=ema200,
     )
 
 

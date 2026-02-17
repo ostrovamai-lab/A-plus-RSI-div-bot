@@ -73,11 +73,34 @@ class KAMAParams:
 
 
 @dataclass
+class FilterParams:
+    """Hard rejection filters — applied before scoring."""
+    # ADX
+    adx_period: int = 14
+    adx_hard_reject: float = 30.0    # reject counter-trend when ADX >= this
+    adx_trend_threshold: float = 20.0  # trend is present
+    adx_ranging_threshold: float = 15.0  # no trend (ranging)
+
+    # ATR volatility regime
+    atr_ema_period: int = 100
+    min_atr_ratio: float = 0.5       # reject if ATR/ATR_EMA < this
+    min_sl_range_pct: float = 0.003  # reject if |entry-fractal|/price < this
+
+    # EMA200 trend
+    ema200_period: int = 200
+
+    # ATR-based SL
+    sl_atr_multiplier: float = 0.0   # 0=disabled; set >0 for ATR-based SL floor
+
+
+@dataclass
 class ScoringWeights:
     aplus_signal: float = 25.0
     rsi_divergence: float = 20.0
     ema_ribbon: float = 15.0
+    adx_trend: float = 0.0
     kama_trend: float = 10.0
+    ema200_position: float = 0.0
     rsi_position: float = 10.0
     htf_alignment: float = 10.0
     bb_position: float = 5.0
@@ -138,6 +161,7 @@ class BotConfig:
     aplus: APlusParams = field(default_factory=APlusParams)
     tp_rsi: TPRsiParams = field(default_factory=TPRsiParams)
     kama: KAMAParams = field(default_factory=KAMAParams)
+    filters: FilterParams = field(default_factory=FilterParams)
     scoring: ScoringWeights = field(default_factory=ScoringWeights)
     entry: EntryParams = field(default_factory=EntryParams)
     exit: ExitParams = field(default_factory=ExitParams)
@@ -153,8 +177,9 @@ def _apply_dict(obj: Any, data: dict) -> None:
         if hasattr(obj, key):
             current = getattr(obj, key)
             if isinstance(current, (APlusParams, TPRsiParams, KAMAParams,
-                                    ScoringWeights, EntryParams, ExitParams,
-                                    PyramidParams, ReinvestmentParams, ScannerParams)):
+                                    FilterParams, ScoringWeights, EntryParams,
+                                    ExitParams, PyramidParams, ReinvestmentParams,
+                                    ScannerParams)):
                 if isinstance(val, dict):
                     _apply_dict(current, val)
             else:
@@ -191,8 +216,9 @@ def load_config(path: Path | str | None = None) -> BotConfig:
         # Sub-sections
         for section, attr in [
             ("aplus", "aplus"), ("tp_rsi", "tp_rsi"), ("kama", "kama"),
-            ("entry", "entry"), ("exit", "exit"), ("pyramid", "pyramid"),
-            ("reinvestment", "reinvestment"), ("scanner", "scanner"),
+            ("filters", "filters"), ("entry", "entry"), ("exit", "exit"),
+            ("pyramid", "pyramid"), ("reinvestment", "reinvestment"),
+            ("scanner", "scanner"),
         ]:
             if section in raw and isinstance(raw[section], dict):
                 _apply_dict(getattr(cfg, attr), raw[section])

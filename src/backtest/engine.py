@@ -80,7 +80,12 @@ def run_backtest(
     div_lookup = ind.div_lookup
     kama = ind.kama
     atr = ind.atr
+    atr_ema = ind.atr_ema
     vol_ema = ind.vol_ema
+    adx = ind.adx
+    di_plus = ind.di_plus
+    di_minus = ind.di_minus
+    ema200 = ind.ema200
 
     # ── 3. HTF indicators ──
     htf_1h_bullish = compute_htf_kama(klines_1h, cfg) if klines_1h else None
@@ -185,7 +190,15 @@ def run_backtest(
                     open_positions.remove(pos)
                     pending_grids = [g for g in pending_grids if g.get("pos_id") != pos["pos_id"]]
 
-            # Score the signal
+            # ── Extract filter indicators ──
+            atr_val = float(atr.iloc[i]) if not np.isnan(atr.iloc[i]) else 0.0
+            atr_ema_val = float(atr_ema.iloc[i]) if not np.isnan(atr_ema.iloc[i]) else 0.0
+            adx_val = float(adx.iloc[i]) if not np.isnan(adx.iloc[i]) else 0.0
+            dip_val = float(di_plus.iloc[i]) if not np.isnan(di_plus.iloc[i]) else 0.0
+            dim_val = float(di_minus.iloc[i]) if not np.isnan(di_minus.iloc[i]) else 0.0
+            ema200_val = float(ema200.iloc[i]) if not np.isnan(ema200.iloc[i]) else 0.0
+
+            # ── Score the signal ──
             rsi_val = float(tp_rsi["rsi"].iloc[i]) if not np.isnan(tp_rsi["rsi"].iloc[i]) else 50.0
             ribbon = int(tp_rsi["ribbon_score"].iloc[i])
             kama_bull = bool(kama["bullish"].iloc[i]) if not pd.isna(kama["bullish"].iloc[i]) else None
@@ -207,7 +220,12 @@ def run_backtest(
                 aplus_fired=True,
                 recent_divergences=recent_divs,
                 ribbon_score=ribbon,
+                adx_value=adx_val,
+                di_plus=dip_val,
+                di_minus=dim_val,
                 kama_bullish=kama_bull,
+                price=price,
+                ema200_value=ema200_val,
                 rsi_value=rsi_val,
                 htf_1h_kama_bullish=h1_bull,
                 htf_4h_kama_bullish=h4_bull,
@@ -226,7 +244,6 @@ def run_backtest(
                 continue
 
             # Compute entry grid
-            atr_val = float(atr.iloc[i]) if not np.isnan(atr.iloc[i]) else 0.0
             grid_levels = compute_entry_grid(
                 sig_dir, price, fractal_p, atr_val, score,
                 risk.compute_base_size_usd(score.position_scale),
@@ -236,7 +253,11 @@ def run_backtest(
             if not grid_levels:
                 continue
 
-            sl = compute_stop_loss(sig_dir, fractal_p, cfg.entry.sl_buffer_pct)
+            sl = compute_stop_loss(
+                sig_dir, fractal_p, cfg.entry.sl_buffer_pct,
+                atr_value=atr_val,
+                sl_atr_multiplier=cfg.filters.sl_atr_multiplier,
+            )
 
             # Open position (first grid level fills immediately at signal price)
             _next_pos_id += 1

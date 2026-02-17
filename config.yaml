@@ -1,0 +1,118 @@
+# A+ RSI Divergence Bot Configuration
+
+# Symbols to scan (USDT perpetuals)
+symbols:
+  - BTCUSDT
+  - ETHUSDT
+  - SOLUSDT
+  - SUIUSDT
+  - XRPUSDT
+  - DOGEUSDT
+  - ADAUSDT
+  - AVAXUSDT
+  - DOTUSDT
+  - LINKUSDT
+  - MATICUSDT
+  - APTUSDT
+  - ARBUSDT
+  - OPUSDT
+  - NEARUSDT
+  - FILUSDT
+  - ATOMUSDT
+  - LTCUSDT
+  - BCHUSDT
+  - INJUSDT
+
+# Capital & Risk
+capital_usd: 1000.0
+leverage: 10
+max_positions: 5           # max concurrent positions across all coins
+max_positions_per_coin: 3  # max same-direction pyramids per coin
+max_drawdown_pct: 10.0     # halt all trading if equity drops 10% from peak
+
+# Signal Scoring
+scoring:
+  min_score: 65            # minimum composite score to enter
+  pyramid_min_score: 70    # higher threshold for pyramid entries
+  weights:
+    aplus_signal: 25
+    rsi_divergence: 20
+    ema_ribbon: 15
+    kama_trend: 10
+    rsi_position: 10
+    htf_alignment: 10
+    bb_position: 5
+    volume: 5
+
+# A+ Indicator Parameters
+aplus:
+  pivot_lookback: 14
+  fractal_len: 3
+  step_window: 50
+  gate_max_age: 20
+  ema_fast: 3
+  ema_slow: 21
+  break_mode: "Wick+Buffer"  # Wick, Close, Wick+Buffer
+  buffer_ticks: 1
+  need_retest: true
+  retest_lookback: 20
+  allow_pre_cross: true
+
+# TP RSI v2 Parameters
+tp_rsi:
+  rsi_period: 50
+  bb_period: 50
+  bb_mult: 1.0
+  bb_sigma: 0.1
+  ribbon_ma_type: "EMA"
+  ribbon_pairs:
+    - [21, 48]
+    - [51, 98]
+    - [103, 149]
+    - [155, 199]
+    - [206, 499]
+  divergence_lookback: 5
+  divergence_max_range: 60
+
+# KAMA Parameters
+kama:
+  er_length: 10
+  fast_length: 2
+  slow_length: 30
+  slope_bars: 3
+
+# Entry Grid
+entry:
+  fib_levels: [0.236, 0.382, 0.618]
+  fib_volumes: [1.0, 1.272, 1.618]
+  min_range_atr_mult: 0.5   # minimum grid range = 0.5 * ATR(14)
+  sl_buffer_pct: 0.002      # 0.2% buffer beyond fractal for SL
+
+# Exit
+exit:
+  time_stop_bars: 200       # ~26 hours on 8min
+  maker_fee: 0.0002         # 0.02%
+  taker_fee: 0.00055        # 0.055%
+
+# Pyramiding
+pyramid:
+  max_pyramids: 3
+  size_scaling: [1.0, 0.75, 0.5]
+  move_sl_to_be: true       # move existing SL to breakeven on pyramid
+
+# Reinvestment
+reinvestment:
+  enabled: true
+  min_scale: 0.5
+  max_scale: 2.0
+
+# Higher Timeframe
+htf:
+  intervals: ["60", "240"]  # 1h and 4h for confirmation
+
+# Scanner
+scanner:
+  poll_interval_sec: 480    # 8 minutes
+  batch_size: 4             # symbols per batch (rate limiting)
+  batch_delay_sec: 0.5
+  history_bars_1m: 600      # 1min bars to fetch (= 75 x 8min bars)

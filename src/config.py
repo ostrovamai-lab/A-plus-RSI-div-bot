@@ -1,0 +1,204 @@
+"""Configuration loader — merges config.yaml with .env environment variables."""
+
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+import yaml
+from dotenv import load_dotenv
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+load_dotenv(PROJECT_ROOT / ".env")
+
+
+def _env(key: str, default: str = "") -> str:
+    return os.getenv(key, default)
+
+
+# ── Exchange credentials ──────────────────────────────────
+
+BYBIT_API_KEY: str = _env("BYBIT_API_KEY")
+BYBIT_API_SECRET: str = _env("BYBIT_API_SECRET")
+BYBIT_DEMO: bool = _env("BYBIT_DEMO", "true").lower() == "true"
+
+# ── Telegram ──────────────────────────────────────────────
+
+TELEGRAM_BOT_TOKEN: str = _env("TELEGRAM_BOT_TOKEN")
+TELEGRAM_CHAT_ID: str = _env("TELEGRAM_CHAT_ID")
+
+# ── Paths ─────────────────────────────────────────────────
+
+DATA_DIR = PROJECT_ROOT / "data"
+DATA_DIR.mkdir(exist_ok=True)
+
+
+@dataclass
+class APlusParams:
+    pivot_lookback: int = 14
+    fractal_len: int = 3
+    step_window: int = 50
+    gate_max_age: int = 20
+    ema_fast: int = 3
+    ema_slow: int = 21
+    break_mode: str = "Wick+Buffer"
+    buffer_ticks: int = 1
+    need_retest: bool = True
+    retest_lookback: int = 20
+    allow_pre_cross: bool = True
+
+
+@dataclass
+class TPRsiParams:
+    rsi_period: int = 50
+    bb_period: int = 50
+    bb_mult: float = 1.0
+    bb_sigma: float = 0.1
+    ribbon_ma_type: str = "EMA"
+    ribbon_pairs: list[list[int]] = field(default_factory=lambda: [
+        [21, 48], [51, 98], [103, 149], [155, 199], [206, 499],
+    ])
+    divergence_lookback: int = 5
+    divergence_max_range: int = 60
+
+
+@dataclass
+class KAMAParams:
+    er_length: int = 10
+    fast_length: int = 2
+    slow_length: int = 30
+    slope_bars: int = 3
+
+
+@dataclass
+class ScoringWeights:
+    aplus_signal: float = 25.0
+    rsi_divergence: float = 20.0
+    ema_ribbon: float = 15.0
+    kama_trend: float = 10.0
+    rsi_position: float = 10.0
+    htf_alignment: float = 10.0
+    bb_position: float = 5.0
+    volume: float = 5.0
+
+
+@dataclass
+class EntryParams:
+    fib_levels: list[float] = field(default_factory=lambda: [0.236, 0.382, 0.618])
+    fib_volumes: list[float] = field(default_factory=lambda: [1.0, 1.272, 1.618])
+    min_range_atr_mult: float = 0.5
+    sl_buffer_pct: float = 0.002
+
+
+@dataclass
+class ExitParams:
+    time_stop_bars: int = 200
+    maker_fee: float = 0.0002
+    taker_fee: float = 0.00055
+
+
+@dataclass
+class PyramidParams:
+    max_pyramids: int = 3
+    size_scaling: list[float] = field(default_factory=lambda: [1.0, 0.75, 0.5])
+    move_sl_to_be: bool = True
+
+
+@dataclass
+class ReinvestmentParams:
+    enabled: bool = True
+    min_scale: float = 0.5
+    max_scale: float = 2.0
+
+
+@dataclass
+class ScannerParams:
+    poll_interval_sec: int = 480
+    batch_size: int = 4
+    batch_delay_sec: float = 0.5
+    history_bars_1m: int = 600
+
+
+@dataclass
+class BotConfig:
+    """Full bot configuration."""
+
+    symbols: list[str] = field(default_factory=list)
+    capital_usd: float = 1000.0
+    leverage: int = 10
+    max_positions: int = 5
+    max_positions_per_coin: int = 3
+    max_drawdown_pct: float = 10.0
+
+    min_score: float = 65.0
+    pyramid_min_score: float = 70.0
+
+    aplus: APlusParams = field(default_factory=APlusParams)
+    tp_rsi: TPRsiParams = field(default_factory=TPRsiParams)
+    kama: KAMAParams = field(default_factory=KAMAParams)
+    scoring: ScoringWeights = field(default_factory=ScoringWeights)
+    entry: EntryParams = field(default_factory=EntryParams)
+    exit: ExitParams = field(default_factory=ExitParams)
+    pyramid: PyramidParams = field(default_factory=PyramidParams)
+    reinvestment: ReinvestmentParams = field(default_factory=ReinvestmentParams)
+    scanner: ScannerParams = field(default_factory=ScannerParams)
+    htf_intervals: list[str] = field(default_factory=lambda: ["60", "240"])
+
+
+def _apply_dict(obj: Any, data: dict) -> None:
+    """Recursively apply dict values to a dataclass instance."""
+    for key, val in data.items():
+        if hasattr(obj, key):
+            current = getattr(obj, key)
+            if isinstance(current, (APlusParams, TPRsiParams, KAMAParams,
+                                    ScoringWeights, EntryParams, ExitParams,
+                                    PyramidParams, ReinvestmentParams, ScannerParams)):
+                if isinstance(val, dict):
+                    _apply_dict(current, val)
+            else:
+                setattr(obj, key, val)
+
+
+def load_config(path: Path | str | None = None) -> BotConfig:
+    """Load configuration from YAML file, falling back to defaults."""
+    if path is None:
+        path = PROJECT_ROOT / "config.yaml"
+    path = Path(path)
+
+    cfg = BotConfig()
+
+    if path.exists():
+        with open(path) as f:
+            raw = yaml.safe_load(f) or {}
+
+        # Top-level scalars
+        for key in ("symbols", "capital_usd", "leverage", "max_positions",
+                     "max_positions_per_coin", "max_drawdown_pct"):
+            if key in raw:
+                setattr(cfg, key, raw[key])
+
+        # Scoring section
+        scoring_raw = raw.get("scoring", {})
+        if "min_score" in scoring_raw:
+            cfg.min_score = scoring_raw["min_score"]
+        if "pyramid_min_score" in scoring_raw:
+            cfg.pyramid_min_score = scoring_raw["pyramid_min_score"]
+        if "weights" in scoring_raw:
+            _apply_dict(cfg.scoring, scoring_raw["weights"])
+
+        # Sub-sections
+        for section, attr in [
+            ("aplus", "aplus"), ("tp_rsi", "tp_rsi"), ("kama", "kama"),
+            ("entry", "entry"), ("exit", "exit"), ("pyramid", "pyramid"),
+            ("reinvestment", "reinvestment"), ("scanner", "scanner"),
+        ]:
+            if section in raw and isinstance(raw[section], dict):
+                _apply_dict(getattr(cfg, attr), raw[section])
+
+        # HTF
+        if "htf" in raw and "intervals" in raw["htf"]:
+            cfg.htf_intervals = raw["htf"]["intervals"]
+
+    return cfg

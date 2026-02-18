@@ -263,7 +263,7 @@ def run_backtest_v2(
                 sig_dir, i, ind, cfg, ts, htf_1h_map, smc_1h,
                 vol_arr, close_arr,
             )
-            if entry_score.total < cfg.min_score:
+            if entry_score.total < v2.min_score:
                 continue
 
             # e. Existing session in same direction? → pyramid
@@ -487,11 +487,19 @@ def _update_trailing_sl(
     high_arr: np.ndarray,
     v2,
 ) -> None:
-    """Update peak price and trailing SL.  SL only tightens."""
+    """Update peak price and trailing SL.  SL only tightens.
+
+    Trailing only activates once peak has moved favorably beyond avg_entry.
+    This prevents the trail from choking a fresh position before it has
+    room to breathe.
+    """
+    avg = sess.avg_entry
     if sess.direction == SignalDirection.LONG:
         if hi > sess.peak_price:
             sess.peak_price = hi
-        # Trail: min(low) over lookback
+        # Only trail once price has moved above entry
+        if sess.peak_price <= avg:
+            return
         lookback_start = max(0, bar_idx - v2.trail_lookback + 1)
         trail_level = float(np.min(low_arr[lookback_start : bar_idx + 1]))
         if trail_level > sess.sl_price:
@@ -499,6 +507,9 @@ def _update_trailing_sl(
     else:
         if lo < sess.peak_price:
             sess.peak_price = lo
+        # Only trail once price has moved below entry
+        if sess.peak_price >= avg:
+            return
         lookback_start = max(0, bar_idx - v2.trail_lookback + 1)
         trail_level = float(np.max(high_arr[lookback_start : bar_idx + 1]))
         if trail_level < sess.sl_price:
@@ -572,11 +583,12 @@ def _find_sl_from_structure(
     if min_dist <= dist_frac <= max_dist:
         candidates.append(frac_sl)
 
-    # Pick tightest
+    # Pick widest — gives the trade room to breathe before trailing takes over.
+    # "Tightest" would choke entries where an OB sits right at entry price.
     if candidates:
         if is_long:
-            return max(candidates)  # highest SL below entry
-        return min(candidates)  # lowest SL above entry
+            return min(candidates)  # lowest SL = most room below entry
+        return max(candidates)  # highest SL = most room above entry
 
     # Ultimate fallback: fractal ± buffer (ignore distance bounds)
     return frac_sl
@@ -592,8 +604,12 @@ def _compute_base_qty(
     score: SignalScore,
     leverage: int,
 ) -> float:
-    """Compute qty for first entry in a new session."""
-    base_usd = risk.compute_base_size_usd(score.position_scale)
+    """Compute qty for first entry in a new session.
+
+    V2 uses flat scale 1.0 — regime filter is the quality gate,
+    score is only a minimum quality floor (not a sizing factor).
+    """
+    base_usd = risk.compute_base_size_usd(1.0)
     if base_usd <= 0 or price <= 0:
         return 0.0
     return base_usd * leverage / price

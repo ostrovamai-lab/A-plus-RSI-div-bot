@@ -159,7 +159,8 @@ class V2Config:
     smc_8m_internal_length: int = 5
 
     # Entry filters
-    volume_mult: float = 1.0
+    min_score: float = 40.0
+    volume_mult: float = 0.5
     require_premium_discount: bool = True
     require_sunday_open: bool = False
 

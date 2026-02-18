@@ -127,7 +127,8 @@ v2:
   smc_1h_swing_length: 10
   smc_8m_swing_length: 20
   smc_8m_internal_length: 5
-  volume_mult: 1.0
+  min_score: 40
+  volume_mult: 0.5
   require_premium_discount: true
   require_sunday_open: false
   max_sessions: 2

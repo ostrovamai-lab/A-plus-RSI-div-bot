@@ -68,7 +68,7 @@ def main():
         print(f"{'-' * 70}")
 
         for min_score in range(40, 95, 5):
-            cfg.min_score = float(min_score)
+            cfg.v2.min_score = float(min_score)
             result = run_backtest_v2(klines_1m, klines_1h or None, cfg, args.symbol)
             print(
                 f"{min_score:>10d} | {result.total_trades:>7d} | "
@@ -78,7 +78,7 @@ def main():
         return
 
     if args.min_score > 0:
-        cfg.min_score = args.min_score
+        cfg.v2.min_score = args.min_score
 
     print(f"Running V2 backtest on {args.symbol} ({len(klines_1m)} 1m bars → 8min resampling)...")
     result = run_backtest_v2(klines_1m, klines_1h or None, cfg, args.symbol)

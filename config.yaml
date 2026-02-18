@@ -93,6 +93,11 @@ exit:
   time_stop_bars: 200       # ~26 hours on 8min
   maker_fee: 0.0002         # 0.02%
   taker_fee: 0.00055        # 0.055%
+  be_atr_mult: 1.0          # activate breakeven after 1×ATR favorable move (0=off)
+  be_buffer_pct: 0.001      # 0.1% buffer above avg entry (covers fees)
+  trail_activation_atr: 2.0 # start trailing after 2×ATR (0=off)
+  trail_distance_atr: 1.5   # trail 1.5×ATR behind peak
+  time_stop_trail_bars: 500 # extended hold when trailing is active
 
 # Pyramiding
 pyramid:
@@ -116,3 +121,19 @@ scanner:
   batch_size: 4             # symbols per batch (rate limiting)
   batch_delay_sec: 0.5
   history_bars_1m: 600      # 1min bars to fetch (= 75 x 8min bars)
+
+# V2 Trend-Following Engine
+v2:
+  smc_1h_swing_length: 10
+  smc_8m_swing_length: 20
+  smc_8m_internal_length: 5
+  volume_mult: 1.0
+  require_premium_discount: true
+  require_sunday_open: false
+  max_sessions: 2
+  max_pyramid_levels: 4
+  pyramid_profit_fraction: 0.5
+  pyramid_max_base_mult: 5.0
+  sl_atr_buffer_mult: 0.5
+  trail_lookback: 10
+  choch_partial_pct: 0.50

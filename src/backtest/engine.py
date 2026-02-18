@@ -5,11 +5,14 @@ Flow:
 2. Pre-compute HTF indicators
 3. Build HTF timestamp mapping (bisect-based)
 4. Bar-by-bar loop:
-   a. Check SL hits (high/low)
-   b. Check grid limit fills (high/low)
-   c. Check A+ signals → score → enter or skip
-   d. Check opposite signal → close positions
-   e. Track equity
+   a. Dynamic stops (update peaks + breakeven + trailing)
+   b. Check SL hits (high/low) — uses updated sl_price
+   c. Check grid limit fills (high/low)
+   d. Check A+ signals → score → enter or skip
+   e. Check opposite signal → close positions
+   f. Check time stop (extended when trailing active)
+   g. Drawdown check
+   h. Track equity
 5. Generate report
 """
 
@@ -27,7 +30,13 @@ from indicators.suite import compute_htf_kama, compute_indicator_suite
 from models import BacktestResult, SignalDirection, Trade
 from scoring.signal_scorer import score_signal
 from strategy.entry_engine import compute_entry_grid, compute_stop_loss
-from strategy.exit_engine import check_opposite_signal, check_stop_loss, check_time_stop
+from strategy.exit_engine import (
+    check_opposite_signal,
+    check_stop_loss,
+    check_time_stop,
+    compute_breakeven_sl,
+    compute_trailing_sl,
+)
 from strategy.pnl import compute_fee, compute_pnl
 from strategy.risk_manager import RiskManager
 
@@ -132,21 +141,30 @@ def run_backtest(
             result.timestamps.append(ts)
             continue
 
-        # ── 5a. Check SL hits ──
+        # ── 5a. Dynamic stops (update peaks + BE + trail) ──
+        for pos in open_positions:
+            _update_dynamic_stops(pos, hi, lo, cfg.exit)
+
+        # ── 5b. Check SL hits ──
         for pos in list(open_positions):
             if pos["sl_price"] > 0:
                 sl_hit = check_stop_loss(
                     pos["direction"], pos["sl_price"], hi, lo,
                 )
                 if sl_hit:
-                    trade = _close_position(pos, sl_hit.exit_price, i, "sl", cfg)
+                    reason = "sl"
+                    if pos.get("trail_active"):
+                        reason = "trail_sl"
+                    elif pos.get("be_triggered"):
+                        reason = "breakeven_sl"
+                    trade = _close_position(pos, sl_hit.exit_price, i, reason, cfg)
                     result.trades.append(trade)
                     risk.update_equity(trade.pnl - trade.fee)
                     open_positions.remove(pos)
                     # Cancel associated grid orders
                     pending_grids = [g for g in pending_grids if g.get("pos_id") != pos["pos_id"]]
 
-        # ── 5b. Check grid limit fills ──
+        # ── 5c. Check grid limit fills ──
         for grid in list(pending_grids):
             filled = False
             if grid["side"] == "Buy" and lo <= grid["price"]:
@@ -163,7 +181,7 @@ def run_backtest(
                         break
                 pending_grids.remove(grid)
 
-        # ── 5c. Check A+ signals → score → enter ──
+        # ── 5d. Check A+ signals → score → enter ──
         aplus_long = bool(aplus["aplus_long"][i])
         aplus_short = bool(aplus["aplus_short"][i])
 
@@ -267,6 +285,11 @@ def run_backtest(
                 "symbol": symbol,
                 "open_bar": i,
                 "sl_price": sl,
+                "original_sl": sl,
+                "entry_atr": atr_val,
+                "peak_price": price,
+                "be_triggered": False,
+                "trail_active": False,
                 "fills": [(price, float(grid_levels[0].qty))],
                 "grid_fills": 1,
                 "score": score.total,
@@ -283,10 +306,11 @@ def run_backtest(
                     "qty": float(gl.qty),
                 })
 
-        # ── 5d. Check time stops ──
+        # ── 5e. Check time stops ──
         for pos in list(open_positions):
             bars_held = i - pos["open_bar"]
-            ts_exit = check_time_stop(bars_held, cfg.exit.time_stop_bars, price)
+            max_bars = cfg.exit.time_stop_trail_bars if pos.get("trail_active") else cfg.exit.time_stop_bars
+            ts_exit = check_time_stop(bars_held, max_bars, price)
             if ts_exit:
                 trade = _close_position(pos, ts_exit.exit_price, i, "time_stop", cfg)
                 result.trades.append(trade)
@@ -294,7 +318,7 @@ def run_backtest(
                 open_positions.remove(pos)
                 pending_grids = [g for g in pending_grids if g.get("pos_id") != pos["pos_id"]]
 
-        # ── 5e. Drawdown check ──
+        # ── 5f. Drawdown check ──
         if risk.check_drawdown():
             for pos in list(open_positions):
                 trade = _close_position(pos, price, i, "drawdown", cfg)
@@ -352,6 +376,60 @@ def _close_position(pos: dict, exit_price: float, bar_index: int, reason: str, c
         grid_fills=pos.get("grid_fills", 0),
         pyramid_level=pos.get("pyramid_level", 0),
     )
+
+
+def _update_dynamic_stops(pos: dict, hi: float, lo: float, exit_cfg) -> None:
+    """Update peak price and apply breakeven / trailing stop logic.
+
+    SL only tightens — never loosens from current value.
+    """
+    direction = pos["direction"]
+    entry_atr = pos.get("entry_atr", 0.0)
+    if entry_atr <= 0:
+        return
+
+    # 1. Update peak favorable price
+    if direction == SignalDirection.LONG:
+        if hi > pos["peak_price"]:
+            pos["peak_price"] = hi
+    else:
+        if lo < pos["peak_price"]:
+            pos["peak_price"] = lo
+
+    avg = _avg_entry(pos)
+    peak = pos["peak_price"]
+
+    # 2. Breakeven check
+    if not pos["be_triggered"]:
+        be_sl = compute_breakeven_sl(
+            direction, avg, peak, entry_atr,
+            exit_cfg.be_atr_mult, exit_cfg.be_buffer_pct,
+        )
+        if be_sl is not None:
+            # SL only tightens: for LONG, new SL must be higher; for SHORT, lower
+            if direction == SignalDirection.LONG:
+                if be_sl > pos["sl_price"]:
+                    pos["sl_price"] = be_sl
+                    pos["be_triggered"] = True
+            else:
+                if be_sl < pos["sl_price"]:
+                    pos["sl_price"] = be_sl
+                    pos["be_triggered"] = True
+
+    # 3. Trailing stop check
+    trail_sl = compute_trailing_sl(
+        direction, avg, peak, entry_atr,
+        exit_cfg.trail_activation_atr, exit_cfg.trail_distance_atr,
+    )
+    if trail_sl is not None:
+        pos["trail_active"] = True
+        # SL only tightens
+        if direction == SignalDirection.LONG:
+            if trail_sl > pos["sl_price"]:
+                pos["sl_price"] = trail_sl
+        else:
+            if trail_sl < pos["sl_price"]:
+                pos["sl_price"] = trail_sl
 
 
 def _avg_entry(pos: dict) -> float:

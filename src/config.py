@@ -120,6 +120,11 @@ class ExitParams:
     time_stop_bars: int = 200
     maker_fee: float = 0.0002
     taker_fee: float = 0.00055
+    be_atr_mult: float = 1.0           # activate breakeven after 1×ATR favorable move (0=off)
+    be_buffer_pct: float = 0.001       # 0.1% buffer above avg entry (covers fees)
+    trail_activation_atr: float = 2.0  # start trailing after 2×ATR (0=off)
+    trail_distance_atr: float = 1.5    # trail 1.5×ATR behind peak
+    time_stop_trail_bars: int = 500    # extended hold when trailing is active
 
 
 @dataclass
@@ -142,6 +147,40 @@ class ScannerParams:
     batch_size: int = 4
     batch_delay_sec: float = 0.5
     history_bars_1m: int = 600
+
+
+@dataclass
+class V2Config:
+    """V2 trend-following engine configuration."""
+
+    # SMC regime
+    smc_1h_swing_length: int = 10
+    smc_8m_swing_length: int = 20
+    smc_8m_internal_length: int = 5
+
+    # Entry filters
+    volume_mult: float = 1.0
+    require_premium_discount: bool = True
+    require_sunday_open: bool = False
+
+    # Session / Pyramid
+    max_sessions: int = 2
+    max_pyramid_levels: int = 4
+    pyramid_profit_fraction: float = 0.5
+    pyramid_max_base_mult: float = 5.0
+
+    # SL
+    sl_atr_buffer_mult: float = 0.5
+    sl_min_distance_pct: float = 0.002
+    sl_max_distance_pct: float = 0.05
+    trail_lookback: int = 10
+
+    # Exit
+    choch_partial_pct: float = 0.50
+
+    # Fees
+    maker_fee: float = 0.0002
+    taker_fee: float = 0.00055
 
 
 @dataclass
@@ -169,6 +208,7 @@ class BotConfig:
     reinvestment: ReinvestmentParams = field(default_factory=ReinvestmentParams)
     scanner: ScannerParams = field(default_factory=ScannerParams)
     htf_intervals: list[str] = field(default_factory=lambda: ["60", "240"])
+    v2: V2Config = field(default_factory=V2Config)
 
 
 def _apply_dict(obj: Any, data: dict) -> None:
@@ -179,7 +219,7 @@ def _apply_dict(obj: Any, data: dict) -> None:
             if isinstance(current, (APlusParams, TPRsiParams, KAMAParams,
                                     FilterParams, ScoringWeights, EntryParams,
                                     ExitParams, PyramidParams, ReinvestmentParams,
-                                    ScannerParams)):
+                                    ScannerParams, V2Config)):
                 if isinstance(val, dict):
                     _apply_dict(current, val)
             else:
@@ -218,7 +258,7 @@ def load_config(path: Path | str | None = None) -> BotConfig:
             ("aplus", "aplus"), ("tp_rsi", "tp_rsi"), ("kama", "kama"),
             ("filters", "filters"), ("entry", "entry"), ("exit", "exit"),
             ("pyramid", "pyramid"), ("reinvestment", "reinvestment"),
-            ("scanner", "scanner"),
+            ("scanner", "scanner"), ("v2", "v2"),
         ]:
             if section in raw and isinstance(raw[section], dict):
                 _apply_dict(getattr(cfg, attr), raw[section])

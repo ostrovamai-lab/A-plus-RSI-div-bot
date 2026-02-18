@@ -11,7 +11,10 @@ from __future__ import annotations
 from models import SignalDirection
 
 # Reasons that trigger a taker (market) exit
-MARKET_EXIT_REASONS = frozenset({"sl", "opposite_signal", "drawdown"})
+MARKET_EXIT_REASONS = frozenset({
+    "sl", "trail_sl", "breakeven_sl", "opposite_signal", "drawdown",
+    "regime_flip", "choch_partial",
+})
 
 
 def compute_pnl(

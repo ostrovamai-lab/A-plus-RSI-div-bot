@@ -66,6 +66,69 @@ def check_time_stop(
     return None
 
 
+def compute_breakeven_sl(
+    direction: SignalDirection,
+    avg_entry: float,
+    peak_favorable: float,
+    entry_atr: float,
+    be_atr_mult: float,
+    be_buffer_pct: float,
+) -> float | None:
+    """Compute breakeven SL price if favorable move threshold is met.
+
+    Returns the breakeven SL (avg_entry ± buffer) if the peak favorable
+    price has moved at least be_atr_mult × entry_atr from avg_entry.
+    Returns None if threshold not met or feature disabled (be_atr_mult <= 0).
+    """
+    if be_atr_mult <= 0 or entry_atr <= 0:
+        return None
+
+    threshold = be_atr_mult * entry_atr
+
+    if direction == SignalDirection.LONG:
+        favorable_move = peak_favorable - avg_entry
+        if favorable_move >= threshold:
+            return avg_entry * (1 + be_buffer_pct)
+    else:
+        favorable_move = avg_entry - peak_favorable
+        if favorable_move >= threshold:
+            return avg_entry * (1 - be_buffer_pct)
+
+    return None
+
+
+def compute_trailing_sl(
+    direction: SignalDirection,
+    avg_entry: float,
+    peak_favorable: float,
+    entry_atr: float,
+    trail_activation_atr: float,
+    trail_distance_atr: float,
+) -> float | None:
+    """Compute trailing SL price if activation threshold is met.
+
+    Returns peak_favorable ∓ trail_distance_atr × entry_atr if the peak
+    has moved at least trail_activation_atr × entry_atr from avg_entry.
+    Returns None if threshold not met or feature disabled.
+    """
+    if trail_activation_atr <= 0 or entry_atr <= 0:
+        return None
+
+    activation = trail_activation_atr * entry_atr
+    distance = trail_distance_atr * entry_atr
+
+    if direction == SignalDirection.LONG:
+        favorable_move = peak_favorable - avg_entry
+        if favorable_move >= activation:
+            return peak_favorable - distance
+    else:
+        favorable_move = avg_entry - peak_favorable
+        if favorable_move >= activation:
+            return peak_favorable + distance
+
+    return None
+
+
 def check_drawdown_halt(
     current_equity: float,
     initial_capital: float,
